@@ -235,23 +235,54 @@ code {
   border-radius: 4px;
 }
 
-/* ============ 顶部 ============ */
+/* ============ 顶部（自绘标题栏） ============ */
+/* 原生标题栏已隐藏（electron/main.ts 的 titleBarStyle: "hidden"），这一条就是标题栏本体：
+   高度与覆盖层一致、整条可拖拽，右侧靠 env(titlebar-area-*) 让开系统窗口按钮。 */
 .header {
+  /* 与 electron/main.ts 的 TITLEBAR_HEIGHT 一致（改一处要改两处） */
+  --titlebar-h: 44px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  /* 底色与全窗统一用 --bg（原 --panel 的白条与内容区有割裂感），
-     仅靠底边发丝线分隔；按钮/pill 本就是 --panel 描边芯片，浮起更清晰 */
-  padding: 8px 18px;
+  /* 不参与 .app 的纵向 flex 压缩（否则 height 会被压扁） */
+  flex: none;
+  /* 高度写死、不取 env(titlebar-area-height)：那个值一旦与覆盖层高度不一致，
+     系统按钮旁会露出背景缝 */
+  height: var(--titlebar-h);
+  /* 左右再各留 14px；env 给出系统按钮占用区——Windows 在右（约 138 DIP）、
+     macOS 交通灯在左。取不到 env 时回退成仅 14px 内衬 */
+  padding-left: calc(env(titlebar-area-x, 0px) + 14px);
+  padding-right: calc(100% - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100%) + 14px);
   background: var(--bg);
+  /* 通栏分隔线：系统窗口按钮的 WCO 覆盖层是**透明**的（见 electron/main.ts 的
+     TITLEBAR_COLORS），线不再被右上角的按钮区截断，最大化/还原两态都连续 */
   border-bottom: 1px solid var(--border);
+  /* 整条顶栏可拖拽窗口 / 双击最大化 */
+  -webkit-app-region: drag;
 }
 
-/* 顶栏左侧：仅侧栏开关（品牌区已移除） */
+/* 拖拽区会吞掉指针事件：可交互子元素必须显式解除
+   （按标签兜底，新加顶栏控件不必再逐个挂 no-drag） */
+.header button,
+.header input,
+.header a {
+  -webkit-app-region: no-drag;
+}
+
+/* 顶栏左侧：侧栏开关 + 品牌字样 */
 .header-left {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+/* 自绘的应用名（原生标题栏已隐藏；窗口/任务栏标题仍是 CC Desktop） */
+.brand {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  letter-spacing: 0.2px;
+  white-space: nowrap;
 }
 
 .header-actions {
@@ -259,8 +290,7 @@ code {
   align-items: center;
   gap: 8px;
   margin-left: auto;
-  /* 按钮组不参与压缩。品牌区已移除，左侧只剩 32px 侧栏开关，
-     minWidth=800 下左右两簇恒不相接（32+8+550+36 << 800） */
+  /* 按钮组不参与压缩；minWidth=960 下左侧「开关+品牌」与右侧这一簇不相接 */
   flex: none;
 }
 

@@ -85,6 +85,20 @@ import type { IpcContract } from "./ipc-contract";
 
 const DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL ?? "http://127.0.0.1:1420";
 
+/** 自绘标题栏高度（DIP）：必须与 src/styles.css 的 --titlebar-h 一致（改一处要改两处） */
+const TITLEBAR_HEIGHT = 44;
+/** 标题栏覆盖层（WCO）配色。color 取**透明**：覆盖层一旦不透明就会盖住右上角的
+ *  网页内容，顶栏那条通栏分隔线在系统窗口按钮区被截断（且「最大化/还原」两态下覆盖层
+ *  的实际范围还会变，贴着下沿画线治标不治本）。透明后系统按钮只叠在网页之上，顶栏背景
+ *  与分隔线原样透出。
+ *  ⚠️ 不用纯 `rgba(0,0,0,0)`：旧版 Electron（≤41.10.6，本机 41.7.1）把它当「未设置」
+ *  回退成系统边框色；取非哨兵的零 alpha 值 `rgba(1,0,0,0)` 规避。
+ *  symbolColor 是系统按钮的描边色，需与顶栏底色（styles.css 的 --bg）成对比，随主题定。 */
+const TITLEBAR_COLORS = {
+  light: { color: "rgba(1, 0, 0, 0)", symbolColor: "#292524" },
+  dark: { color: "rgba(1, 0, 0, 0)", symbolColor: "#f4f1ea" },
+} as const;
+
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 /** true 时 close 事件不再拦截（quit_app / window_destroy / before-quit 已置位） */
@@ -268,17 +282,36 @@ function createTray(): void {
 
 function createWindow(): void {
   const { app: appIconPath } = appIcon();
+  // 系统按钮描边色（覆盖层 symbolColor）得按主题定：深色主题启动时用浅色描边会看不清。
+  // 渲染层加载 config 之前就要定，故这里先读一次
+  let darkAtStart = false;
+  try {
+    darkAtStart = loadConfig(rootDir()).dark === true;
+  } catch {
+    /* 读不到配置就用浅色兜底 */
+  }
   mainWindow = new BrowserWindow({
     title: "CC Desktop",
     width: 1120,
     height: 720,
-    minWidth: 800,
+    // 顶栏内容与右侧原生窗口按钮（WCO 覆盖层约 138 DIP）同排后，800 会挤到重叠，抬高下限
+    minWidth: 960,
     minHeight: 500,
     center: true,
     resizable: true,
     icon: appIconPath,
     show: false,
     autoHideMenuBar: true,
+    // 隐藏原生标题栏（应用名与功能入口改由页面自绘在 .header 这一条里），
+    // 但保留系统的最小化/最大化/关闭（Windows/Linux 的 WCO 覆盖层）——
+    // 它们是真正的系统按钮，双击拖拽区最大化、Win11 贴靠布局都还在。
+    // macOS 忽略 titleBarOverlay，交通灯由系统在最左绘制，靠 .header 的
+    // env(titlebar-area-*) 让位（见 styles.css）
+    titleBarStyle: "hidden",
+    titleBarOverlay: {
+      ...(darkAtStart ? TITLEBAR_COLORS.dark : TITLEBAR_COLORS.light),
+      height: TITLEBAR_HEIGHT,
+    },
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
@@ -601,6 +634,13 @@ function registerIpc(): void {
   handle("window_destroy", () => {
     quitting = true;
     mainWindow?.destroy();
+  });
+  // 标题栏覆盖层跟随 App 主题（Windows/Linux 的 WCO；macOS 交通灯由系统绘制，无此 API）
+  handle("window_set_titlebar_theme", (p) => {
+    if (process.platform === "darwin") return;
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    const c = p.dark ? TITLEBAR_COLORS.dark : TITLEBAR_COLORS.light;
+    mainWindow.setTitleBarOverlay({ ...c, height: TITLEBAR_HEIGHT });
   });
 }
 

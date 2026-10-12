@@ -612,6 +612,9 @@ export default function App() {
 
   useEffect(() => {
     document.documentElement.dataset.theme = dark ? "dark" : "light";
+    // 自绘标题栏右侧的原生窗口按钮是主进程绘制的，不跟 CSS 变量走——
+    // 不通知它换色，深色主题下右上角会留一块浅色底
+    api.setTitlebarTheme(dark).catch(() => {});
   }, [dark]);
 
   // ---------- 配置持久化 / 主题 ----------

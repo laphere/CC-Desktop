@@ -157,6 +157,8 @@ export interface IpcContract {
   };
   window_hide: void;
   window_destroy: void;
+  /** 标题栏覆盖层跟随主题（Windows/Linux 的 WCO；macOS 为 no-op） */
+  window_set_titlebar_theme: { dark: boolean };
 }
 
 export type IpcChannel = keyof IpcContract;
@@ -235,6 +237,7 @@ export const IPC_CHANNELS = [
   "save_file",
   "window_hide",
   "window_destroy",
+  "window_set_titlebar_theme",
 ] as const;
 
 // ---------------- 白名单与契约的双向断言（编译期） ----------------

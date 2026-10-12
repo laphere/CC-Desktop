@@ -312,6 +312,8 @@ export const api = {
   hideWindow: () => invoke("window_hide"),
   /** 强制销毁窗口（close_action = quit 时绕过关闭拦截） */
   destroyWindow: () => invoke("window_destroy"),
+  /** 标题栏覆盖层的原生窗口按钮配色跟随主题（Windows/Linux；macOS 无效果） */
+  setTitlebarTheme: (dark: boolean) => invoke("window_set_titlebar_theme", { dark }),
   /** 订阅窗口关闭请求（主进程拦截 close 后转发）；返回取消订阅函数 */
   onCloseRequested: (cb: () => void) => bridge.onCloseRequested(cb),
   /** 订阅窗口获得焦点（替代 Tauri 的 onFocusChanged）；返回取消订阅函数 */

@@ -54,7 +54,8 @@ export default function Header({
 }: Props) {
   return (
     <header className="header">
-      {/* 左侧仅侧栏开关：品牌区已按用户要求移除（窗口/任务栏标题仍有应用名） */}
+      {/* 左起：侧栏开关 → 品牌字样。原生标题栏已隐藏（见 main.ts 的 titleBarStyle），
+          应用名改由这里自绘，侧栏开关排在它左侧 */}
       <div className="header-left">
         <button
           className={`icon-btn ${sidebarCollapsed ? "icon-btn-on" : ""}`}
@@ -63,6 +64,7 @@ export default function Header({
         >
           <PanelLeftIcon size={15} />
         </button>
+        <span className="brand">CC Desktop</span>
       </div>
       <div className="header-actions">
         <button className="pill pill-provider" title="供应商切换" onClick={onProviders}>
