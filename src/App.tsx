@@ -24,7 +24,6 @@ import Header from "./components/Header";
 import { MessageCircleIcon, SearchIcon, XIcon } from "./components/Icons";
 import ProjectList from "./components/ProjectList";
 import PinnedSessions from "./components/PinnedSessions";
-import StatusBar from "./components/StatusBar";
 import ContextMenu from "./components/ContextMenu";
 import { animateModalClose, MODAL_EXIT_MS } from "./components/Modal";
 import NewLauncherDialog from "./components/NewLauncherDialog";
@@ -1872,12 +1871,6 @@ export default function App() {
           )}
         </div>
       </main>
-
-      <StatusBar
-        total={items.length}
-        missingCount={missing.length}
-        claudeOk={claudeOk}
-      />
 
       {/* 三套右键菜单：**首次打开后常驻挂载**，open/data-open 驱动 CSS 进出场；
           冻结视图（*View）保证出场那 ~100ms 里渲染的是旧内容而不是空菜单 */}

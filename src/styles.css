@@ -2679,18 +2679,6 @@ html.ctrl-links .md-body a {
   margin-top: 5px;
 }
 
-/* ============ 底部状态栏 ============ */
-.statusbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 18px;
-  font-size: 11.5px;
-  color: var(--muted);
-  border-top: 1px solid var(--border);
-  background: var(--panel);
-}
-
 /* ============ 右键菜单 ============ */
 /* 右键菜单（三套共用）：**常驻挂载 + data-open 开合**，不是 {open && …} 条件渲染——
  * 那样只有「闪现」没有出场（React 卸载是即时的）。机制：
