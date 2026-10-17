@@ -209,7 +209,8 @@ export interface StartChatOptions {
   projectPath: string;
   /** 续聊的会话 id（与 sessionId 互斥；传了就走 --resume） */
   resumeId?: string;
-  /** 初始权限模式；不传（undefined）则继承项目 settings 的 defaultMode（由 SDK 内部选项驱动） */
+  /** 初始权限模式；不传（undefined）时**不给 CLI 传 `permissionMode`**，由 CLI 自己按 settings
+   *  的 `permissions.defaultMode` 定（CLI 的 flag 压过 settings，所以这里不能兜一个默认值） */
   initialMode?: ChatPermissionMode;
 }
 
@@ -1182,15 +1183,11 @@ class ChatSession {
       enableFileCheckpointing: true,
     };
 
+    // 用户改选过权限档才显式传 flag；不传时 CLI 按 settings 的
+    // permissions.defaultMode 决定初始档位（settings 没写则用它自己的默认）。
+    // 传了就会压过 settings——CLI 的 flag 优先于配置文件。
     if (this.explicitMode) {
-      // 用户改选过权限档 → 显式传 flag
       options.permissionMode = toSdkPermissionMode(this.explicitMode);
-    } else {
-      // 未显式指定 → 继承项目 settings 的 defaultMode。
-      // ⚠️ 内部选项（sdk.d.ts 未声明、但 sdk.mjs 实现了）：不置 true 会被 SDK 强制
-      // --permission-mode default，压过 settings 的 permissions.defaultMode。
-      // @ts-expect-error 内部选项：sdk.d.ts 未声明，但 sdk.mjs 实现了。
-      options.resolvePermissionModeInCli = true;
     }
 
     if (this.resumeId) {
@@ -1398,8 +1395,8 @@ class ChatSession {
    * （`titleAskCount` / `TITLE_MAX_ASKS`）；不问的话单轮会话、老 CLI 都拿不到 AI 标题。
    * 探针：`%TEMP%\title-probe\probe.mjs`（A=init 问 / B=零请求对照 / C=轮末问）。
    *
-   * `generateSessionTitle` 在 `sdk.d.ts` 里**没有声明**（运行时方法，与 `resolvePermissionModeInCli`
-   * 同一类，见 start() 里的注释与 docs/agent-sdk-capabilities.md §6.12）。`persist: true` 让它把
+   * `generateSessionTitle` 在 `sdk.d.ts` 里**没有声明**（运行时方法，与 `--permission-prompt-tool`
+   * 同属「类型面之外、升级时要回归」的一类；口径见 docs/agent-sdk-capabilities.md §6.12）。`persist: true` 让它把
    * `{"type":"ai-title","aiTitle":…}` 追进 jsonl——与 TUI 生成的逐字同形，于是左栏列表
    * （回退链 customTitle > aiTitle > 首条用户消息，见 sessions.ts）与新对话收编轮询
    * 都自然读到 AI 标题。

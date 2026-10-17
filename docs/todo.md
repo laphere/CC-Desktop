@@ -17,12 +17,14 @@
 
 **进度（2026-09-24 一轮，探针 `%TEMP%\sdk2-probe\`）**：已落地三项——**模型热切**（`ModelPicker`，槽位反映供应商映射）、**`/` 命令补全**（composer 上弹面板）、**撤销本轮改动**（`rewindFiles`，变更文件面板行内二次确认）；effort 选择器探明「零回显」后**砍掉**。§7 表与 §9 探针清单已同步。剩余候选按原表排队。
 
+**2026-10-17**：SDK `0.3.278 → 0.3.302` 升级落地（`package.json` + 删掉已失效的 `resolvePermissionModeInCli` 内部选项；typecheck / 444 个单测 / 生产构建全过）。增量清单见 `docs/agent-sdk-capabilities.md` §10，`prewarm` 探针结论见 §6.15。下面第 4 项已按新 API 改写。
+
 **已知的高价值项**（细节见上文档，此处只记排序意图）：
 
 1. `getContextUsage()` → 会话页头部加「上下文占用」（纯读取，成本最低）
 2. `options.title` → 省掉新会话那段「等标题落盘」的轮询（现在头部统计 / 四按钮都挂在拿到标题上）
 3. `supportedCommands()` / `supportedModels()` + `setModel()` → `/` 补全 + 模型热切（`ModePicker.tsx` 已有权限档位下拉的先例）
-4. `startup()` 预热 → 消掉首条消息的冷启（**要先定预热时机与 warm 池失效策略**，`WarmQuery` 只能 query 一次、`Options` 起进程时定死）
+4. `prewarm()` + `claim()` 预热 → 省掉**进程级**启动成本（**2026-10-17 探针已验**，见 `docs/agent-sdk-capabilities.md` §6.15：冷启/预热交替两轮，用户视角「按下发送 → init」冷启 2376ms、预热 1962ms，**只省约 0.4s**；`prewarm` 本身还要 469ms，算进去基本持平。⚠️ 别被「claim 后 53–76ms 首帧」迷惑，那是 `system:ui_invalidate` 维护帧，不是就绪）。取代原 `startup()` 方案——预热时不用 cwd，不必按项目分桶。**是否值得做取决于那 ~0.4s 值不值一个常驻 230–260MB 的进程**（MCP/插件多、磁盘冷的机器上可能更划算，未测）。限制：**单次性、只对新会话**；认领目录的 project settings 设了 `model`/`env`/`agent`/`defaultMode` 会被拒（`project_settings_not_claimable`），**必须回退 `query()`**；宿主级 Options 改了要丢 spare 重预热（换供应商即属此列））
 5. `agents` / `tool()` + `createSdkMcpServer()` → app 内置子代理、把会话搜索/用量查询做成工具（**要先把 `zod`、`@modelcontextprotocol/sdk` 显式加进 `dependencies`**，现在只是传递装进来的）
 6. `enableFileCheckpointing` + `rewindFiles()` → 变更文件面板加「撤销本轮改动」（机制已实测 2026-09-23，`docs/agent-sdk-capabilities.md` §6.10：与 `~/.claude/file-history/` 手工恢复路**同一仓库**；只回滚文件、回滚后模型经 `edited_text_file` 附件自动纠偏；剩「跟踪范围 vs 面板聚合口径」重合度待验）
 7. `USAGE_*_PREFIXES` + `rate_limit_event` → 配额类错误的差异化 UI（常量现成，直接可用）

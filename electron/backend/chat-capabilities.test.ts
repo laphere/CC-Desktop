@@ -116,6 +116,31 @@ describe("spawn 选项", () => {
   });
 });
 
+describe("权限档位：只有用户改选过才传 permissionMode", () => {
+  /** 起一个新会话并发一条消息，触发 ensureStarted → query(options)。返回捕获到的 options。 */
+  async function optionsFor(id: string, initialMode?: "manual" | "plan"): Promise<Record<string, unknown>> {
+    fake.options = null;
+    const mgr = new ChatManager(() => {});
+    mgr.start(id, { projectPath: process.cwd(), initialMode });
+    await mgr.send(id, "hi");
+    return fake.options!;
+  }
+
+  it("未改选：options 里没有 permissionMode —— CLI 的 flag 会压过 settings，必须留空才能继承 permissions.defaultMode", async () => {
+    const o = await optionsFor("pm-none");
+    expect(o).not.toBeNull();
+    expect("permissionMode" in o).toBe(false);
+  });
+
+  it("改选「手动确认」：manual 映射成 CLI 的 default", async () => {
+    expect((await optionsFor("pm-manual", "manual")).permissionMode).toBe("default");
+  });
+
+  it("改选 plan：原样透传", async () => {
+    expect((await optionsFor("pm-plan", "plan")).permissionMode).toBe("plan");
+  });
+});
+
 describe("模型热切（supportedModels / setModel）", () => {
   it("进程没起：supportedModels 返回 null（前端据此禁用选择器）", async () => {
     const mgr = new ChatManager(() => {});

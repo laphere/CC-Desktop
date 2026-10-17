@@ -1,15 +1,17 @@
-# Claude Agent SDK 能力面与用法（本机 0.3.278）
+# Claude Agent SDK 能力面与用法（本机 0.3.302）
 
-> 2026-09-22 整理。依据：本机 `node_modules/@anthropic-ai/claude-agent-sdk/`——`sdk.d.ts`（9451 行 / 228 个导出类型）、`package.json`（`claudeCodeVersion: "2.1.278"`）、`manifest.json`；加上仓库既有实测（`electron/backend/chat.ts`、`docs/agent-sdk-interactive-tools.md`、`CLAUDE.md` 的「Agent SDK 验证结论」）。
+> 2026-09-22 整理，**2026-10-17 随 SDK 0.3.278 → 0.3.302 升级更新**。依据：本机 `node_modules/@anthropic-ai/claude-agent-sdk/`——`sdk.d.ts`（10128 行 / 约 260 个顶层导出）、`package.json`（`claudeCodeVersion: "2.1.302"`）、`manifest.json`；加上仓库既有实测（`electron/backend/chat.ts`、`docs/agent-sdk-interactive-tools.md`、`CLAUDE.md` 的「Agent SDK 验证结论」）。
 >
-> **标注口径**：**实** = 本仓库真跑过、有实测记录；**型** = 只来自 `sdk.d.ts` 的类型面，**没跑过**。标 **型** 的条目在采用前先写探针验一次——这个 SDK 的坑基本都长在「类型上写着、运行时不是那么回事」的地方（`resolvePermissionModeInCli`、`updatedInput.answers` 都是这么发现的）。
+> **本次升级的增量（0.3.280–0.3.302 的 API 面）与 `prewarm` 探针结论见 §10**；下面各章的「本项目用没用」已按升级后的状态订正。
 >
-> 为什么写这篇：对话层目前只用到 `Options` 的 6 项 + `Query` 的 3 个方法，而 SDK 的能力面散在 9451 行 d.ts 里没有索引——「预热子进程」「查上下文占用」「热切模型」「结构化输出」「进程内自定义工具 / 子代理」这些能力都在，本项目一个都没用。本文把「它有什么 / 怎么用 / 本项目用没用」一次钉死，以后不用重读 d.ts。
+> **标注口径**：**实** = 本仓库真跑过、有实测记录；**型** = 只来自 `sdk.d.ts` 的类型面，**没跑过**。标 **型** 的条目在采用前先写探针验一次——这个 SDK 的坑基本都长在「类型上写着、运行时不是那么回事」的地方（`updatedInput.answers` 得带答案、`generateSessionTitle` 不在 d.ts 里，都是这么发现的）。
+>
+> 为什么写这篇：对话层目前只用到 `Options` 的 8 项 + `Query` 的十来个方法，而 SDK 的能力面散在 10128 行 d.ts 里没有索引——「预热子进程」「查上下文占用」「热切模型」「结构化输出」「进程内自定义工具 / 子代理」这些能力都在，本项目大多没用。本文把「它有什么 / 怎么用 / 本项目用没用」一次钉死，以后不用重读 d.ts。
 
 ## TL;DR
 
 1. **它不是新 API，是 Claude Code CLI 的进程包装**：SDK 负责 spawn CLI、按 stream-json 协议收发、把事件翻成 `SDKMessage`。所以「SDK 的能力」≈「CLI 的能力」——CLI 有的它基本都有，只是换了个编程入口。
-2. **能力面 = `Options`（68 个开关）× `Query`（28 个运行时方法）× `SDKMessage`（39 种事件）+ 一组会话文件 API**。第一项是配置，第二项是运行中控制，第三项是你要渲染的东西。（四个数字都是按本机 `sdk.d.ts` 数出来的。）
+2. **能力面 = `Options`（69 个开关）× `Query`（29 个运行时方法）× `SDKMessage`（39 种事件）+ 一组会话文件 API + 起会话的三个入口（`query()` / `startup()` / `prewarm()`）**。第一项是配置，第二项是运行中控制，第三项是你要渲染的东西。（数字按本机 `sdk.d.ts` 数出；事件联合类型自 0.3.278 起没增删过。）
 3. **两种输入模式**：`prompt: string`（单发）与 `prompt: AsyncIterable<SDKUserMessage>`（流式）。**`Query` 上的运行时方法（`interrupt` / `setModel` / `setPermissionMode` …）只在流式模式可用**——本项目用的正是流式（队列 generator），天生具备。
 4. **传了 `canUseTool` 就自动补 `--permission-prompt-tool stdio`**——交互工具三件套的开关。通道、payload、回传格式见 `docs/agent-sdk-interactive-tools.md`（那份是权威），本文不重复。
 5. 打包两条铁律不变（esbuild `external` + asarUnpack），见 §8。
@@ -20,20 +22,21 @@
 
 | 项 | 值 | 说明 |
 |---|---|---|
-| SDK 版本 | `0.3.278` | `package.json` 的 `version` |
-| 对应 CLI | `2.1.278` | `package.json` 的 `claudeCodeVersion` + `manifest.json` 的 `version`，两处一致 |
-| 原生二进制 | `optionalDependencies` 列 8 个平台包 | npm 只装匹配本机的那一个（win32-x64 的 `claude.exe` 237MB）。**2026-09-23 起从 `build.files` 排除、不进安装包**——对话层只认本机 claude（§8 第 5 条），安装包不再因它变大 |
+| SDK 版本 | `0.3.302` | `package.json` 的 `version`（2026-10-17 由 0.3.278 升上来） |
+| 对应 CLI | `2.1.302` | `package.json` 的 `claudeCodeVersion` + `manifest.json` 的 `version`，两处一致；**本机实际跑的那份 CLI 也是 2.1.302，两者已对齐** |
+| 原生二进制 | `optionalDependencies` 列 8 个平台包 | npm 只装匹配本机的那一个（win32-x64 的 `claude.exe` 290MB）。**2026-09-23 起从 `build.files` 排除、不进安装包**——对话层只认本机 claude（§8 第 5 条），安装包不再因它变大 |
 | peerDependencies | `@anthropic-ai/sdk >=0.93.0`、`@modelcontextprotocol/sdk ^1.29.0`、`zod ^4.0.0` | **都不在本仓 `package.json` 的 dependencies 里**，是 npm 7+ 自动装的 peer。本机 zod 实际是 `4.6.5` |
 
 > ⚠️ **想用 `tool()` / `createSdkMcpServer()`（§6.2）就得显式把 `zod` 与 `@modelcontextprotocol/sdk` 加进 `dependencies`**。现在是传递装进来的，`npm install` 时解析不到就会炸；靠「本机恰好有」不是依赖声明。
 
-**版本对齐是硬约束**：SDK 与 CLI 是同一份协议的两端，`manifest.json` 里的 `sdkCompat.testedWrapperVersions` 记录了测过的 wrapper 版本区间。升 SDK 必须成对升 CLI（或反过来），否则会出现「flag 传了没反应」这类静默失配（`--permission-prompt-tool` 就是未正式列出的 CLI 面，升级时值得回归）。
+**版本对齐是硬约束**：SDK 与 CLI 是同一份协议的两端，`manifest.json` 里的 `sdkCompat.testedWrapperVersions` 记录了测过的 wrapper 版本区间。升 SDK 必须成对升 CLI（或反过来），否则会出现「flag 传了没反应」这类静默失配（`--permission-prompt-tool` 就是未正式列出的 CLI 面，升级时值得回归）。**CLI 侧的兼容是单向的**：CLI 2.1.302 的清单里仍列着 0.3.278（旧 wrapper 还能跑），但 0.3.278 的清单只测到 0.3.277 wrapper——即「新 CLI 认旧 wrapper」成立、「旧 CLI 认新 wrapper」不保证。
 
-## 1. 五个入口
+## 1. 六个入口
 
 | 导入路径 | 内容 | 本项目 |
 |---|---|---|
 | `.`（`sdk.mjs`） | 主入口，本文除特别说明外都指它 | ✅ 在用（动态 `import()`） |
+| `./core` | 与主入口同源的精简入口：`query()` / `startup()` / `tool()` / `createSdkMcpServer()` / 会话文件 API / `resolveSettings()`，**不含**会话列举与读取助手（eager 代码约主入口的 1/5）；与主入口**不可混用**（两份 bundle 各自持有类与状态）。注意它**不导出 `prewarm`** | 未用（本项目要的 `renameSession` 主入口就有；收益只是省一点 eager 加载） |
 | `./sdk-tools` | **纯类型**：内置工具的输入 JSON Schema（`BashInput` / `FileEditInput` / `ExitPlanModeInput` / `ReportFindingsInput` … 约 20 个） | 未用。要在渲染层给工具调用做**结构化渲染**（而不是打印 JSON）时很有用 |
 | `./browser` | 浏览器环境的 `query` + SSE 相关（`getSseDropCounts` / `getSseLastSequenceNum`） | 未用，本项目是 Electron 主进程 |
 | `./bridge` | 远端会话：`attachBridgeSession` / `createCodeSession` / `fetchRemoteCredentials` / `isCredentialsFailure` | 未用 |
@@ -41,10 +44,10 @@
 
 主入口的顶层导出，按用途分四组：
 
-- **起会话**：`query()`、`startup()`（→ `WarmQuery` 预热，§6.8）
+- **起会话**：`query()`、`startup()`（→ `WarmQuery`，§6.8）、`prewarm()`（→ `SpareProcess` + `claim()`，§6.15）
 - **会话文件 API**：`listSessions` / `getSessionInfo` / `getSessionMessages` / `getSubagentMessages` / `listSubagents` / `renameSession` / `tagSession` / `deleteSession` / `forkSession` / `importSessionToStore`（§6.6）
 - **自定义工具**：`tool()` / `createSdkMcpServer()`（§6.2）
-- **工具函数与常量**：`resolveSettings()`、`filterEscalatingDefaultMode()`、`HOOK_EVENTS`（33 个）、`EXIT_REASONS`、`USAGE_LIMIT_ERROR_PREFIXES` / `USAGE_WARNING_PREFIXES` / `USAGE_TRANSITION_PREFIXES` / `ORG_POLICY_LIMIT_PREFIXES`（配额文案识别）、`SYSTEM_PROMPT_DYNAMIC_BOUNDARY`、`AbortError`
+- **工具函数与常量**：`resolveSettings()`、`filterEscalatingDefaultMode()`、`HOOK_EVENTS`（33 个）、`EXIT_REASONS`、`BUILTIN_TOOL_NAMES`（内置工具名表，`@alpha`）、`LEGACY_TOOL_NAME_ALIASES`（旧工具名 → 现名，`Task`→`Agent` 那类）、`USAGE_LIMIT_ERROR_PREFIXES` / `USAGE_WARNING_PREFIXES` / `USAGE_TRANSITION_PREFIXES` / `ORG_POLICY_LIMIT_PREFIXES`（配额文案识别）、`SYSTEM_PROMPT_DYNAMIC_BOUNDARY`、`AbortError`
 
 > 💡 `USAGE_*_PREFIXES` 这几组常量对本项目直接可用：对话层现在是把 CLI 的错误串原样抛给前端，用它们可以区分「配额用完 / 接近上限 / 组织策略禁用」，从而给出不一样的 UI。
 
@@ -125,7 +128,7 @@ queue.push({ type: "user", message: { role: "user", content: "…" }, parent_too
 
 > ⚠️ `tools` / `allowedTools` / `disallowedTools` 三者语义不同：`tools` 是**声明可用集合**，`allowedTools` 是**免确认白名单**，`disallowedTools` 是**硬禁**。`toolAliases` 与 `disallowedTools` 互补而非替代——别名只影响「按名字查模型发出的 tool_use」，`disallowedTools` 连不经名字查找的内部直呼也挡。
 
-## 4. `Query`：运行时控制（28 个方法）
+## 4. `Query`：运行时控制（29 个方法）
 
 > ⚠️ **标题下这一段方法只在流式输入模式下可用**（d.ts 的注释明确写了「control requests, only supported when streaming input/output is used」）。单发模式调用会拿不到预期效果。
 
@@ -134,9 +137,9 @@ queue.push({ type: "user", message: { role: "user", content: "…" }, parent_too
 | 打断 / 收尾 | `interrupt()` **实**（新版 CLI 返回 receipt，列出**仍会执行**的异步消息 uuid）、`close()` **实**、`stopTask(taskId)`、`backgroundTasks(toolUseId?)`（把前台 Bash / 子代理转后台） |
 | 改状态 | `setPermissionMode(mode)` **实**、`setModel(model?)`、`setMaxThinkingTokens(token, display?)`、`applyFlagSettings(partial)`（只改会话级 flag 层）、`updateSettings(source, obj)`（**真写 settings 文件**，同 `/config` 那条路） |
 | 查状态 | `initializationResult()`、`reinitialize()`、`supportedCommands()`（斜杠命令表）、`supportedModels()`、`supportedAgents()`、`accountInfo()`、`getContextUsage()`、`mcpServerStatus()` |
-| MCP 热管 | `reconnectMcpServer(name)` / `toggleMcpServer(name, enabled)` / `setMcpServers(record)`（只影响动态加的，settings 文件里的不受影响） |
+| MCP 热管 | `reconnectMcpServer(name)` / `toggleMcpServer(name, enabled)` / `setMcpServers(record)`（只影响动态加的，settings 文件里的不受影响）、`readMcpResource(serverName, uri)`（读某个 MCP server 暴露的资源，返回 `contents[]`；0.3.302 新增） |
 | 文件 | `readFile(path)`、`seedReadState(path, mtime)`（给 CLI 的读取缓存喂值）、`rewindFiles(userMessageId)` |
-| 热重载 | `reloadPlugins()` / `reloadSkills()` / `reloadOutputStyles()` |
+| 热重载 | `reloadPlugins({ holdOnCacheImpact?, addPlugins? })`（`addPlugins` 是 0.3.302 新增：把若干插件目录当启动时就带着那样挂进来）/ `reloadSkills()` / `reloadOutputStyles()` |
 | 输入 | `streamInput(stream)`（SDK 内部用于多轮，本项目不需要直接调） |
 | MCP 权限 | `setMcpPermissionModeOverride(serverName, 'default' \| 'auto' \| null)`（**只能收紧，不会放宽**） |
 | 标题 | `generateSessionTitle(desc, { persist? })`（**实**，2026-09-22；**d.ts 未声明**，见 §6.12） |
@@ -161,6 +164,7 @@ queue.push({ type: "user", message: { role: "user", content: "…" }, parent_too
 - **`system` / `subtype: 'status'` 带 `permissionMode`**（2026-09-22 实测，本项目已用）：CLI 把「模式变了」压在这帧上，**与工具结果同刻到达**——`EnterPlanMode` 生效时报 `plan`、批准 `ExitPlanMode` 时报回 prePlanMode。底部模式选择器要跟手就得吃这帧（本项目走 `permission_mode` 事件，见 `chat.ts` 的 `translateSystem`）。注意 `status: 'requesting'` 那类帧 `permissionMode` 为 `undefined`，有才认。
 - **`prompt_suggestion`**：每轮**最多一条、且在 `result` 之后到达**——所以消费端必须在拿到 `result` 之后**继续迭代流**，否则永远收不到（想要「下一句猜你想问什么」的 UI 才需要）。
 - **`rate_limit_event` + §1 的 `USAGE_*_PREFIXES`**：配额类 UI 的两块料。
+- **0.3.302 补齐的字段**（类型面新增，CLI 早就在发）：`task_*` 与 `background_tasks_changed` 条目带 `run_id`（同一次运行的所有帧同值，resume 换新值）、`parent_task_id`、`subagent_type`；assistant / user 帧带 `agent_id`（哪个子代理产出的）；`conversation_reset` 带 `trigger`（`clear` / `plan_mode_exit` / `fresh_session` / `onboarding`）与 `user_message_uuid`；init 带 `view_mode`（`focus` / `default`）与 `plugin_errors`；result 带 `first_text_post_queue_wait_ms`；usage 带 `fallback_credit`、`overageEnabled`；`SDKControlInitializeResponse` 带 `claude_code_version`。
 
 ## 6. 能力专题
 
@@ -283,6 +287,8 @@ warm.close();                     // 不要了就这么丢弃
 
 对本项目的适配问题：现在是**首条消息才 spawn**，用 `startup()` 就得决定「什么时候预热」——候选是「点项目行「+」开 tab 时」或「窗口聚焦时预热当前项目」。而 `WarmQuery` 只能 query 一次、`Options` 又是起进程时定死的（cwd / resume id 都绑定了），所以**预热粒度是「某个项目的某个新会话」**，不能一个 warm 复用到多个项目。要做的话得配一个带失效策略的 warm 池。
 
+> ⚠️ **0.3.302 起有更好的选择：`prewarm()` + `claim()`（§6.15）**——它连 `cwd` 都不要，预热时不必知道是哪个项目，因此不存在「warm 池按项目分桶」的问题。要预热就上 prewarm，`startup()` 只当它不存在。
+
 ### 6.9 沙箱（**型**）
 
 ```ts
@@ -337,8 +343,9 @@ getContextUsage({ detail: 'summary' })
 
 ```ts
 // ⚠️ sdk.d.ts 里没有这个方法（也不是导出函数），只有 sdk.mjs 里实现了 —— 与
-// resolvePermissionModeInCli 同一类「内部面」，升级时要回归。对话层用 @ts-expect-error
-// 风格的类型断言调用（chat.ts 的 ChatSession.generateTitle）。
+// `--permission-prompt-tool` 同属「未在类型面 / 官方文档里正式列出」的内部面，升级 SDK
+// 或 CLI 时要回归。对话层用 @ts-expect-error 风格的类型断言调用（chat.ts 的
+// ChatSession.generateTitle）。
 // 2.1.283 起返回值可能是 null（此刻没得可起，见上方订正）——别照旧写成 Promise<string>：
 // null 正是「下一轮 init 补问」的判据。
 generateSessionTitle(description: string, opts?: { persist?: boolean }) → Promise<string | null>
@@ -390,17 +397,49 @@ generateSessionTitle(description: string, opts?: { persist?: boolean }) → Prom
 
 **版本错位补充**：CLI 2.1.281 + SDK 0.3.278 下，上述全部帧 + `generateSessionTitle` + 权限面在真机 app 均照常工作——错位本身不构成升级阻塞，但 §8.8 那批内部面在升级时仍要回归。
 
+### 6.15 预热：`prewarm()` + `claim()`（**实**，2026-10-17 探针，SDK 0.3.302 + CLI 2.1.302；**alpha**）
+
+```ts
+const spare = await prewarm({ options: hostOptions });   // 进程起好、停在 parking 目录
+// …用户在新会话 tab 里发了第一条消息：
+const q = spare.claim({ prompt, options: { cwd, model, permissionMode } });
+spare.claimed.catch(() => startNormally());              // 认领被拒 → 回退 query()
+```
+
+与 `startup()` 的关键差异：**`prewarm` 时不需要 `cwd`**（停在一个 parking 目录），`cwd` / `model` / `permissionMode` / `settings` 覆盖 / `title` / `agents` 都等到 `claim` 才给（`ClaimOptions`）。预热阶段就把进程启动、模块加载、config、认证、工具、插件、宿主级 MCP 握手、hooks、`canUseTool` 注册、initialize 全做完。`SpareProcess.claimed` 给出 `{ cwd, sessionId, parkedMs, sdkMcpSettled }`。
+
+**探针实测（`%TEMP%\prewarm-probe\probe4.mjs`，app 形状的 Options：自定义 `spawnClaudeCodeProcess` + `canUseTool` + `includePartialMessages` + `enableFileCheckpointing` + `CLAUDE_CODE_ENTRYPOINT=bench`；冷启/预热交替跑两轮取均值，本机 CLI 2.1.302）**：
+
+| 里程碑 | 冷启 `query()` | `prewarm` + `claim` |
+|---|---|---|
+| 进程可响应 | spawn→首个到达帧 **2386ms**（`system:commands_changed`） | `prewarm()` 本身 **469ms**；`claim()`→首个到达帧 **53–76ms**（是 `system:ui_invalidate` 维护帧） |
+| `init` | **2376ms** | claim→init **1962ms**（+ park 469ms = **2431ms**） |
+| 首个 stream_event（首 token） | 6761ms | 8822ms（两轮 5808 / 11835，**方差 ±3s**） |
+
+- ⚠️ **不要拿「claim→首个到达帧 53–76ms」当「首条消息几乎立刻开跑」**：那帧是 `system:ui_invalidate` 维护帧，只说明**进程活着**。真正的就绪里程碑是 `init`，而它要等 CLI 把第一条消息连同会话级 setup（cwd、SessionStart hooks、会话注册、CLAUDE.md、git 上下文、transcript 位置——这些按设计就**不在** prewarm 里做）跑完。
+- **净收益很小**：两轮均值下，用户视角（按下发送 → init）省 **约 0.4s**；把 `prewarm` 那 469ms 也算进去则**持平甚至略亏**。首个 token 的差被供应商延迟彻底淹没（同配置两轮差 6s）。结论：**在本机这套环境下，prewarm 只省掉进程级启动成本，而会话级 setup 才是那 ~2s 的大头，它省不掉**；值不值得为 ~0.4s 常驻一个 230–260MB 的进程要另算（MCP/插件多、磁盘冷的机器上可能更划算，这次没测）。
+- **能用的**：`claim` 的 `cwd` 生效（`init.cwd` = 认领目录）、`claimed.sessionId === init.session_id`、`permissionMode` 生效、`title` 会以 `custom-title` 行落进 jsonl（= 想直接定标题就不必等 AI 起名）；流式输入（`prompt: AsyncIterable`）同样支持。
+- **单次性**：同一个 spare 二次 `claim()` 抛 `SpareProcess.claim() can only be called once`。一次 prewarm 只服务一个会话。
+- **会被拒**（`spare.claimed` reject，错误码 `project_settings_not_claimable`，同时 Query 以 `error_during_execution` 收场）：认领目录的 project settings 设了 `model` / `env` / `agent`，或在 prewarm 未给 `permissionMode` 时设了 `permissions.defaultMode`。错误文案自带原因，**必须回退 `query()`**（另有一个 `option_not_applied` 例外：只有 `model`/`maxThinkingTokens` 被拒，会话其实已在跑，别重开）。
+- **代价**：parked 进程常驻约 230–260MB；宿主级 Options（可执行文件、`settingSources`、`env`、`mcpServers`、`hooks`、`canUseTool`、`plugins`…）在 prewarm 时定死，**改了就得丢弃 spare 重新预热**（换供应商即属此列）。
+- **认领不了 resume**：`ClaimOptions` 没有 `resume` / `sessionId`，所以**只对新会话有效**——续聊/历史会话仍旧冷启。
+- **与「继承 settings 的 defaultMode」冲突**：项目 settings 写了 `defaultMode` 时，不给档位就认领被拒（见上）；给了档位则认领成功但 settings 被忽略（实测：prewarm 传 `permissionMode: "default"`、认领到写 `defaultMode: plan` 的目录 → 成功且 `init.permissionMode === "default"`）。要两全只能对这类目录回退 `query()`。
+- **`resolvePermissionModeInCli` 已随升级消失**：新 SDK 不传 `permissionMode` 时**不加** `--permission-mode` flag，CLI 自己按 settings 定（实测同目录普通 `query()` 得到 `init.permissionMode === "plan"`）——旧 SDK 那个内部选项就是干这件事的，现在不需要了。另：2.1.302 的 `--help` 里 `--permission-mode` 的 choices 已写成 `manual`，`default` 成了隐藏别名（实测仍被接受）——`toSdkPermissionMode` 的 `manual → "default"` 映射依赖这条未文档化的兼容行为，升级 CLI 时要回归。
+- 探针另观测到：prewarm 出来的子进程上挂着 5 个 `exit` 监听器（认领被拒的路径上瞬时冲到 11，触发一条 `MaxListenersExceededWarning`，随后回落）——宿主自己还挂监听的话，可 `child.setMaxListeners()` 放宽，属噪声不是泄漏。
+
 ---
 
 ## 7. 本项目现状对照
 
-**用的（`chat.ts` 全部家当）**：`cwd`、`canUseTool`、`includePartialMessages`、`abortController`、`spawnClaudeCodeProcess`、`permissionMode`（条件）、`resolvePermissionModeInCli`（内部选项，`@ts-expect-error`）、`resume` \| `sessionId`、`pathToClaudeCodeExecutable`、`enableFileCheckpointing`；运行中调 `interrupt()` / `setPermissionMode()` / `close()` / `getContextUsage()` / `generateSessionTitle()`（内部/未声明面，§6.11、§6.12）/ `supportedModels()` / `setModel()` / `supportedCommands()` / `rewindFiles()`（§6.13、§6.10，2026-09-24 落地：`ModelPicker.tsx` 模型热切、`/` 命令补全面板、变更文件面板的「撤销本轮改动」）；事件翻译认 `command_lifecycle` / `system:task_*` / `system:local_command` 三类帧（§6.14，2026-09-25 落地：命令与子代理可见性 + 命令输出 jsonl 侧补齐）。
+**用的（`chat.ts` 全部家当）**：`cwd`、`canUseTool`、`includePartialMessages`、`abortController`、`spawnClaudeCodeProcess`、`permissionMode`（仅在用户改选过档位时传；不传 = 让 CLI 按 settings 定）、`resume` \| `sessionId`、`pathToClaudeCodeExecutable`、`enableFileCheckpointing`；运行中调 `interrupt()` / `setPermissionMode()` / `close()` / `getContextUsage()` / `generateSessionTitle()`（内部/未声明面，§6.11、§6.12）/ `supportedModels()` / `setModel()` / `supportedCommands()` / `rewindFiles()`（§6.13、§6.10，2026-09-24 落地：`ModelPicker.tsx` 模型热切、`/` 命令补全面板、变更文件面板的「撤销本轮改动」）；事件翻译认 `command_lifecycle` / `system:task_*` / `system:local_command` 三类帧（§6.14，2026-09-25 落地：命令与子代理可见性 + 命令输出 jsonl 侧补齐）。
+
+> **2026-10-17 升级带来的变化**：SDK 0.3.278 → 0.3.302；删掉 `resolvePermissionModeInCli`（新 SDK 不再强推 `--permission-mode default`，不传即让 CLI 按 settings 定，实测一致）。
 
 **没用但值得排队的**（按「对本 app 的收益 ÷ 落地成本」粗排）：
 
 | 能力 | 落地点 | 备注 |
 |---|---|---|
-| `startup()` | 消掉首条消息的冷启等待 | 需先定预热时机 + warm 池失效策略，见 §6.8 |
+| `prewarm()` + `claim()` | 省掉**进程级**启动成本（实测：用户视角到 `init` 只省 ~0.4s，会话级 setup 的 ~2s 省不掉；见 §6.15） | **取代原 `startup()` 方案**（预热时不用 cwd，不必按项目分桶），但**净收益要靠自己的场景量**：为 ~0.4s 常驻 230–260MB 未必值。单次性、只对新会话、项目 settings 设了 `model`/`env`/`agent`/`defaultMode` 时认领被拒 → 需回退 `query()`，见 §6.15 |
 | `agents` | app 内置子代理，跨项目可用 | 与「项目 `.claude/agents/`」互补 |
 | `outputFormat` | 会话导出 / 批量分析的结构化输出 | 只在特定功能里用 |
 | `maxTurns` / `maxBudgetUsd` | 成本护栏（设置项） | 客户端侧，不依赖账单 |
@@ -412,13 +451,13 @@ generateSessionTitle(description: string, opts?: { persist?: boolean }) → Prom
 ## 8. 坑与约束
 
 1. **`settingSources` 不能传 `[]`**（**实**）：那是 SDK isolation 模式，**连认证一起丢**（实测报 `Not logged in`）。本项目刻意不传任何值 = CLI 用自身默认（user + project + local）。
-2. **不传 `settingSources` 也还不够**（**实**）：SDK 默认会显式传 `--permission-mode default`，**CLI flag 压过 settings 里的 `permissions.defaultMode`**。要继承得用内部选项 `resolvePermissionModeInCli: true`（`sdk.d.ts` 里没有、`sdk.mjs` 里实现了），或自己 `resolveSettings()` + `filterEscalatingDefaultMode()` 算好再显式传。
+2. **要继承 settings 的 `permissions.defaultMode`，就别传 `permissionMode`**（**实**，2026-10-17 复验）：CLI flag 压过 settings，传了就一定赢。0.3.302 的 SDK 在不传时不加任何 `--permission-mode` flag，CLI 自己按 settings 定（实测项目 `.claude/settings.json` 写 `defaultMode: "plan"` → `init.permissionMode === "plan"`）。旧 SDK 会默认强推 `--permission-mode default`，当时得靠内部选项 `resolvePermissionModeInCli: true` 绕开——**该选项在 0.3.302 已不存在，代码里的用法也已删除**。若哪天又需要在「不传」之外自己算，仍可用 SDK 导出的 `resolveSettings()` + `filterEscalatingDefaultMode()` 算好再显式传入。
 3. **esbuild 必须 `external`**（**实**）：SDK 是 ESM-first，打进 CJS bundle 会让 esbuild 把 `import.meta.url` 降级成占位对象，而 SDK 靠它定位平台原生二进制——产物一载入就抛 `ERR_INVALID_ARG_VALUE`。所以对话层用运行时动态 `await import()`。
-4. **asarUnpack 只解 SDK 主包、平台包整体排除**（**实**，2026-09-23 起）：主包 `**/node_modules/@anthropic-ai/claude-agent-sdk/**`（`sdk.mjs` 是动态 `import()` 的 ESM，要按真实文件路径加载）；平台包 `!**/node_modules/@anthropic-ai/claude-agent-sdk-*/**` 从 `build.files` 排除、不进安装包——对话层只认本机 claude（见下一条），自带 CLI 是 237MB 死重。
+4. **asarUnpack 只解 SDK 主包、平台包整体排除**（**实**，2026-09-23 起）：主包 `**/node_modules/@anthropic-ai/claude-agent-sdk/**`（`sdk.mjs` 是动态 `import()` 的 ESM，要按真实文件路径加载；新增的 `core.mjs` / `core-*.mjs` 也在通配内，但本项目只走主入口、自包含，不会加载它们）；平台包 `!**/node_modules/@anthropic-ai/claude-agent-sdk-*/**` 从 `build.files` 排除、不进安装包——对话层只认本机 claude（见下一条），自带 CLI 是约 290MB 死重（0.3.302 win32-x64 实测 `size` = 290,211,488 字节）。
 5. **`pathToClaudeCodeExecutable` 只能指真实可执行文件**（**实**）：npm 无扩展名 shim → `failed to launch`；`claude.cmd` → `spawn EINVAL`（SDK 不启 shell）；`bin\claude.exe` → 成功。找不到就抛可读错误（`chat.ts` 的 `requireLocalClaudeExecutable`，chat_send reject → 前端 toast）——**不再回退 SDK 自带**（2026-09-23 起安装包里没有那份）。
 6. **`AbortController` 与 `SpawnOptions.signal` 语义不同**（**型**，d.ts 明确解释）：SDK 故意**不**把调用方的裸 signal 交给 Node `spawn()`——Windows 上那会走 `TerminateProcess`（立即、不可捕获），抢在 SDK 的 stdin-EOF 优雅收尾之前把 CLI 打死。要**立即**信号请捕获自己传给 `abortController` 的那个 controller。本项目的优雅关闭（关 stdin 等 3s 再强杀）正是踩在这条上。
 7. **`bun build --compile` 另有坑**：编译成单文件后 `require.resolve` 在虚拟 FS 里失效，得用 `./extract` 的 `extractFromBunfs()` 把二进制解到真实路径再传进去。本项目不用 bun，忽略即可。
-8. **alpha / 内部面要当心**：`sessionStore` / `taskBudget` / `importSessionToStore` 标了 `@alpha`；`resolvePermissionModeInCli`、`--permission-prompt-tool` 是**未在 d.ts / `--help` 里正式列出**的面。升级 SDK 或 CLI 时这些是第一批要回归的。
+8. **alpha / 内部面要当心**：`sessionStore` / `taskBudget` / `importSessionToStore` / **`prewarm()`** 标了 `@alpha`；`generateSessionTitle()`、`--permission-prompt-tool` 是**未在 d.ts / `--help` 里正式列出**的面。升级 SDK 或 CLI 时这些是第一批要回归的。（`resolvePermissionModeInCli` 已随 0.3.302 一起消失，不再需要回归。）
 9. **`system/init` 要等第一条用户消息才到**（**实**，2026-09-22 踩到）：spawn 完进程（预热）之后**一条 init / result 都没有**，直到真的发一条消息。推论有两条，都很容易踩：
    - **任何「一启动就显示」的信息必须主动问**，不能挂在 `session_ready` 事件上——`getContextUsage()`（§6.11）是现成的主动通道。
    - 终端状态行（`[model ◐ high] ▏0%`）**一启动就有**，那是因为它是 CLI 自己的 UI、读自己的内存状态；宿主复刻不了这条路，只能走控制请求。
@@ -439,8 +478,33 @@ generateSessionTitle(description: string, opts?: { persist?: boolean }) → Prom
 > - 已用该法测出的结论：模型表里那条「自定义模型」= **`ANTHROPIC_MODEL` 的值**（塞 `probe-AAA` 它就逐字变成 `probe-AAA`）；`CLAUDE_CODE_SUBAGENT_MODEL` 不影响模型表；而**表里 `default` 那一行跟的是 opus 槽**（改 `ANTHROPIC_DEFAULT_OPUS_MODEL` 会连带改掉 `default` 的解析值，改 `ANTHROPIC_MODEL` 则不动它）。
 
 1. `getSessionMessages()` 的合并 / usage 口径是否与本项目 `sessions.ts` 一致（§6.6）——**不同就用自家的，别混用**。
-2. `startup()` 预热后 `query()` 的 `Options` 是否仍可部分覆盖（cwd / resume 是否被 warm 时定死）。
+2. ~~`startup()` 预热后 `query()` 的 `Options` 是否仍可部分覆盖~~ → **2026-10-17 换成 `prewarm()` + `claim()` 实测**（§6.15；**仅是探明，本项目尚未接入——`chat.ts` 仍在用 `query()`**）：认领能给的只有 `cwd`/`model`/`permissionMode`/`settings` 覆盖/`title`/`agents` 等，**给不了 `resume`**；认领目录的 project settings 设了 `model`/`env`/`agent`/`defaultMode` 会被拒，须回退 `query()`；净收益只有约 0.4s。
 3. ~~`setModel()` / `setPermissionMode()` 热切的**生效边界**~~ → **2026-09-24 探针已验**（§6.13）：`setModel()` 后 CLI **立即**补发 init（不等下一轮）、`setModel(undefined)` 复位、非法名 reject（供应商 400）。jsonl 的 `permissionMode` 字段一致性仍未单独核对（低风险，`listSessions` 只读它做展示）。
 4. ~~`rewindFiles()` 的跟踪范围与自家「变更文件面板」的重合度~~ → **2026-09-24 二次探针已验**（§6.10）：Write 新建 + Edit 修改都在跟踪集，与面板聚合口径一致。
 5. ~~`getContextUsage()` 的数值口径~~ → **2026-09-22 已接进对话层并复验**：可用，`kind==='used'` 求和 + `maxTokens` 作分母即得占用率；**只有 `percentage` 的单位没验**（所以对话层不转发它，见 §6.11）。
 6. `tool()` + `createSdkMcpServer()` 在**打包后**（asar / unpack）能否正常调用。
+
+---
+
+## 10. 0.3.278 → 0.3.302 的 API 增量（2026-10-17）
+
+> 依据：两版 `sdk.d.ts` + `manifest.json` 的逐项机械 diff（官方 changelog 未取到）。规模：d.ts 9451 → 10128 行；顶层导出 254 → 260；`Options` 68 → 69；`Query` 28 → 29；**`SDKMessage` 联合类型 39 → 39（没增删事件类型，只在既有帧上补字段）**。
+
+**新增导出 6 个**：`prewarm`、`SpareProcess`、`ClaimOptions`（§6.15）、`SDKControlMcpReadResourceResponse`（配 `Query.readMcpResource`）、`BUILTIN_TOOL_NAMES`、`LEGACY_TOOL_NAME_ALIASES`。
+
+**A. 起会话 / 运行时**
+- `prewarm()` + `SpareProcess.claim()`（§6.15，alpha）——本次最大的一件。
+- `Options.verbatimPrompts`（唯一新增开关）：原样下发 prompt，不做 `@path` 展开、不做斜杠命令派发（连本轮的开场附件一并不做）。**本项目不要用**（app 靠斜杠命令与 `@` 展开）。
+- `Query.readMcpResource(serverName, uri)`：读 MCP server 暴露的资源。
+- `Query.reloadPlugins({ addPlugins })`：运行时把插件目录挂进来。
+- `McpSdkServerConfig.tools`：给**宿主自建**的 SDK MCP server 声明逐工具权限策略（本项目不自建，用不上）。
+
+**B. 消息帧补字段**（CLI 早就在发，旧 d.ts 没写；本项目目前一个都没消费）：`task_*` / `background_tasks_changed` 的 `run_id`、`parent_task_id`、`subagent_type`；assistant / user 的 `agent_id`；`conversation_reset` 的 `trigger`、`user_message_uuid`、`timestamp`；init 的 `view_mode`、`plugin_errors`；result 的 `first_text_post_queue_wait_ms` / `first_text_post_queued_behind`；usage 的 `fallback_credit`、`overageEnabled`；user 消息的 `client_composed`、`inline_pastes`；MCP 工具结果的 `_meta`（MCP Apps / `ui://`）；`SDKControlInitializeResponse` 的 `claude_code_version`、`sdk_mcp_manifests_parked`。
+
+**C. `AgentDefinition.autoCompactWindow`**：子代理自己的压缩窗口（只降低、不抬高它继承的窗口）。
+
+**D. settings（CLI 侧读，app 不直接管）**：`deniedModels`、`availableModelsMatch`、`allowedProviders`、`maxProseWidth`、`idleCompaction`、`allowClaudeInChromeWithManagedMcp`；`attribution` 支持 `true`/`false`；sandbox 与 managed-settings 的合并语义大幅扩写。
+
+**E. 启动失败原因枚举**新增 `provider_not_allowed`、`org_config_required_unavailable`、`org_config_refused`（可映射成更具体的中文提示）。
+
+**F. 内部面消失**：`resolvePermissionModeInCli`（旧 SDK 用它压住自己强推的 `--permission-mode default`）。新 SDK 默认不推该 flag，等价行为变成「不传 = CLI 按 settings 定」——本项目的用法已删（§7、§8.2）。
