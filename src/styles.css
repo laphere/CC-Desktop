@@ -96,6 +96,10 @@
   --ease-in-soft: cubic-bezier(0.5, 0, 0.75, 1);
   --ease-emph: cubic-bezier(0.2, 0, 0, 1);
 
+  /* 自绘标题栏高度（DIP）：必须与 electron/main.ts 的 TITLEBAR_HEIGHT 一致（改一处要改两处）。
+   * 放 :root 而非 .header —— 全屏浮层（.lightbox）也要按它把控件让到系统按钮之下 */
+  --titlebar-h: 44px;
+
   /* 让 height:auto ↔ 0 可过渡（Chromium 129+，继承属性）：details 折叠动画的前提。
    * 全局开启只影响「写进 transition 的关键字值」，不会让没写 transition 的东西动起来 */
   interpolate-size: allow-keywords;
@@ -239,8 +243,6 @@ code {
 /* 原生标题栏已隐藏（electron/main.ts 的 titleBarStyle: "hidden"），这一条就是标题栏本体：
    高度与覆盖层一致、整条可拖拽，右侧靠 env(titlebar-area-*) 让开系统窗口按钮。 */
 .header {
-  /* 与 electron/main.ts 的 TITLEBAR_HEIGHT 一致（改一处要改两处） */
-  --titlebar-h: 44px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -3512,7 +3514,10 @@ html.ctrl-links .md-body a {
 
 .lightbox-close {
   position: fixed;
-  top: 14px;
+  /* 让到自绘标题栏之下：顶栏那条可拖拽区与 Windows 的 WCO 系统按钮（透明覆盖层、
+     永远叠在网页之上）都占着窗口最顶 ~44px；贴着 top:14 会正好落进系统关闭钮的区域，
+     点击被系统按钮截走——按下去关的是整个窗口而不是预览 */
+  top: calc(var(--titlebar-h) + 12px);
   right: 16px;
   width: 30px;
   height: 30px;
@@ -3567,7 +3572,8 @@ html.ctrl-links .md-body a {
 /* 第几张 / 共几张 */
 .lightbox-counter {
   position: fixed;
-  top: 20px;
+  /* 与关闭钮同高：一并让开顶部标题栏（Windows 的 WCO 系统按钮 / macOS 的交通灯） */
+  top: calc(var(--titlebar-h) + 12px);
   left: 20px;
   padding: 3px 10px;
   border-radius: 999px;
