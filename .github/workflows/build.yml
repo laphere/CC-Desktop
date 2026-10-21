@@ -1,0 +1,54 @@
+name: Build Installers
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+jobs:
+  build-mac:
+    runs-on: macos-latest # arm64 runner，一次 job 同时出 x64 与 arm64 两个 dmg
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24 # 与本机 v24 对齐，vitest 4 也要求 >=20
+          cache: npm
+
+      - run: npm install
+
+      # runner 钥匙串里没有 Apple 开发者证书，显式关掉 electron-builder 的
+      # 证书自动发现，让它直接走 ad-hoc 签名；产物未公证，首次打开需
+      # 右键 → 打开绕过 Gatekeeper。以后有证书改用 CSC_LINK/CSC_KEY_PASSWORD
+      - name: Build & package dmg (x64 + arm64)
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npm run dist:mac
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac-dmg
+          path: release/*.dmg
+          if-no-files-found: error
+
+  build-win:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm install
+
+      - name: Build & package NSIS installer (x64)
+        run: npm run dist:win
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: win-setup
+          path: release/*.exe
+          if-no-files-found: error
