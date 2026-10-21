@@ -2772,6 +2772,14 @@ html.ctrl-links .md-body a {
   color: var(--danger);
 }
 
+/* 消息区划选「复制」菜单（ChatView）：复用 .context-menu 的壳——单条目用不到
+ * 190px 最小宽，压回内容自适应；user-select:none 兜底防在菜单上拖选把消息区
+ * 刚划好的选区清掉（菜单本体的 mousedown 另有 preventDefault 保选区） */
+.chat-copy-menu {
+  min-width: 0;
+  user-select: none;
+}
+
 /* ============ 模态框 ============ */
 /* 弹层过渡：进场挂在元素自身（挂载即播），出场靠 Modal.tsx 的延迟卸载（先切
  * .closing 播完 MODAL_EXIT_MS 才让宿主清 state 真卸载）——出场比进场快，

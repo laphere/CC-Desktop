@@ -475,6 +475,15 @@ export default function ChatView({
   const [filesOpen, setFilesOpen] = useState(false);
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
 
+  // ---------- 消息区划选右键「复制」 ----------
+  /** 菜单是否打开（开入口在 .chat-body 的 onContextMenu，关闭路径见 bodyRef 处的 effect）。
+   *  ⚠️ 落点单独保存、**关闭时不清空**：.context-menu 的出场靠 display allow-discrete
+   *  淡出，过渡期间元素仍在布局里——若把 left/top 清成 auto，它会回到 flex 容器的
+   *  静态位置（会话页左上角）闪一下「复制」按钮 */
+  const [copyMenuOpen, setCopyMenuOpen] = useState(false);
+  const [copyMenuPos, setCopyMenuPos] = useState({ x: 0, y: 0 });
+  const copyMenuRef = useRef<HTMLDivElement>(null);
+
   // ---------- 对话进度条（左侧用户发言导航轨） ----------
   /** 全量用户发言（后端 get_session_user_prompts 提取，index = 历史消息全局序号） */
   const [prompts, setPrompts] = useState<SessionUserPrompt[]>([]);
@@ -539,6 +548,39 @@ export default function ChatView({
   /** 首次发送前的启动 promise（懒启动：第一条消息才 spawn 进程） */
   const startPromiseRef = useRef<Promise<string> | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
+
+  // 划选「复制」菜单的关闭路径：点菜单外 / Esc / 窗口失焦 / 消息区滚动
+  // （fixed 菜单在内容滚动后会飘离选区，关掉比跟着挪简单且不残留）。
+  // Esc 走本 effect 自己的 keydown + 下方全局 Esc 处理器的 .context-menu[data-open]
+  // 守卫（document 级查询同样命中本菜单）——关菜单优先、不会被当成「打断本轮」。
+  useEffect(() => {
+    if (!copyMenuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      // 点菜单本体交给 onClick（本体 mousedown 已 preventDefault 保住选区）；
+      // 点其他任何地方都先关菜单，选区随原生行为自己清掉
+      if (!copyMenuRef.current?.contains(e.target as Node)) setCopyMenuOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setCopyMenuOpen(false);
+    };
+    const close = () => setCopyMenuOpen(false);
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("blur", close);
+    // scroll 不冒泡：捕获段才接得住 .chat-body 与消息内层（代码块等）的滚动
+    bodyRef.current?.addEventListener("scroll", close, { capture: true });
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("blur", close);
+      bodyRef.current?.removeEventListener("scroll", close, { capture: true });
+    };
+  }, [copyMenuOpen]);
+  // 切走 tab（保活 display:none）时菜单跟着关：保活页里残留的 data-open 菜单
+  // 会被 document 级 Esc 守卫查到，拦住**当前页**的 Esc「打断本轮」
+  useEffect(() => {
+    if (!active) setCopyMenuOpen(false);
+  }, [active]);
   /** 本 ChatView 根节点：Esc 守卫查 picker// 面板时**限定在本页**——其他保活 tab
    *  （display:none）里残留的 data-open 面板不该拦住本页的 Esc（2026-09-26 code review：
    *  .cmd-panel 没有 outside-click 关闭，切 tab 后会残留；App 级右键菜单挂在本组件外，
@@ -2648,7 +2690,28 @@ export default function ChatView({
             })}
           </div>
         )}
-        <div className="chat-body" ref={bodyRef} onScroll={onChatScroll}>
+        <div
+          className="chat-body"
+          ref={bodyRef}
+          onScroll={onChatScroll}
+          onContextMenu={(e) => {
+            // 划选右键「复制」：选区**两端都落在消息区内**才接管（preventDefault
+            // 顶掉系统默认菜单、弹自绘菜单）。空选区一律放行——右键落在选区外时
+            // Chromium 在 mousedown 默认行为里已把选区清掉，这里查到的必是空选区，
+            // 与原生「右键点在选区上才出复制」同一语义；选区跨出消息区（输入框、
+            // 头部等）同样放行，那些区域的右键行为保持现状
+            const sel = window.getSelection();
+            if (!sel || sel.isCollapsed || !sel.anchorNode || !sel.focusNode) return;
+            if (
+              !e.currentTarget.contains(sel.anchorNode) ||
+              !e.currentTarget.contains(sel.focusNode)
+            )
+              return;
+            e.preventDefault();
+            setCopyMenuPos({ x: e.clientX, y: e.clientY });
+            setCopyMenuOpen(true);
+          }}
+        >
           {historyLoading ? (
             <div className="viewer-empty">加载历史消息…</div>
           ) : history.length === 0 && items.length === 0 ? (
@@ -3121,6 +3184,36 @@ export default function ChatView({
         </div>
       </div>
       )}
+
+      {/* 消息区划选右键「复制」菜单：复用 .context-menu 的壳（常驻挂载 + data-open
+          开合，进出场动画与 Esc 守卫的 document 级查询全部白拿）。⚠️ 本体 mousedown
+          必须 preventDefault：不拦的话点「复制」那一下默认先把选区清掉，onClick
+          读到的就是空串；user-select 由 .chat-copy-menu 兜底关掉 */}
+      <div
+        className="context-menu chat-copy-menu"
+        data-open={copyMenuOpen}
+        ref={copyMenuRef}
+        style={{
+          left: Math.min(copyMenuPos.x, window.innerWidth - 150),
+          top: Math.min(copyMenuPos.y, window.innerHeight - 70),
+        }}
+        onMouseDown={(e) => e.preventDefault()}
+      >
+        <button
+          className="context-item"
+          onClick={() => {
+            const text = window.getSelection()?.toString() ?? "";
+            setCopyMenuOpen(false);
+            if (!text) return;
+            api
+              .writeClipboardText(text)
+              .then(() => onToast("已复制"))
+              .catch(() => onToast("复制失败，请重试"));
+          }}
+        >
+          复制
+        </button>
+      </div>
 
       {/* 图片大图预览（只读页也照样能看大图——它不启进程、纯展示）。
           挂在整棵树的最外层：它是 fixed 遮罩，不该被 .chat 的布局影响 */}

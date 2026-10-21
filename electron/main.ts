@@ -3,6 +3,7 @@
 import {
   app,
   BrowserWindow,
+  clipboard,
   dialog,
   ipcMain,
   Menu,
@@ -538,6 +539,10 @@ function registerIpc(): void {
   handle("chat_session_meta", (p) =>
     sessionFileAndTitle(projectsDir(), String(p.projectPath), String(p.sessionId)));
   handle("clipboard_image_path", () => clipboardImagePath());
+  // 消息区划选右键「复制」：渲染层无特权，写剪贴板与读图片路径走同一条 IPC 桥
+  handle("clipboard_write_text", (p) => {
+    clipboard.writeText(String(p.text ?? ""));
+  });
 
   // ---------- 供应商切换 ----------
   handle("provider_list", () => providerListFrom(claudeConfigDir(), rootDir()));

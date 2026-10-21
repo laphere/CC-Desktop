@@ -127,6 +127,8 @@ export interface IpcContract {
   /** 剪贴板里若放着**图片文件**（资源管理器「复制」），返回其路径；否则 null。
    *  只读不动剪贴板；位图/纯文本/非图片文件/非 Windows 一律 null */
   clipboard_image_path: void;
+  /** 把文本写入系统剪贴板（消息区划选右键「复制」） */
+  clipboard_write_text: { text: string };
   // ---------- 供应商切换 ----------
   provider_list: void;
   provider_save: { provider: unknown };
@@ -216,6 +218,7 @@ export const IPC_CHANNELS = [
   "session_title_for",
   "chat_session_meta",
   "clipboard_image_path",
+  "clipboard_write_text",
   "provider_list",
   "provider_save",
   "provider_delete",

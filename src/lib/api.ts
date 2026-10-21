@@ -259,6 +259,8 @@ export const api = {
     }),
   /** 剪贴板里若放着**图片文件**（资源管理器「复制」），返回其路径；否则 null */
   clipboardImagePath: () => invoke<string | null>("clipboard_image_path"),
+  /** 把文本写入系统剪贴板（消息区划选右键「复制」） */
+  writeClipboardText: (text: string) => invoke("clipboard_write_text", { text }),
   /** 订阅某个终端 token 的输出字节流；返回取消订阅函数 */
   onPtyData: (token: string, cb: (chunk: Uint8Array) => void) =>
     bridge.onPtyData(token, cb),
