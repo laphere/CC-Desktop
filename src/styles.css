@@ -1045,9 +1045,14 @@ code {
   font-size: 11.5px;
   color: var(--accent-hover);
   margin-top: 1px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  /* 统计段现在是 6 项（…输出 · 缓存读取 · 缓存命中率）：原来 nowrap + ellipsis 在
+     中等窗口里就已经吃掉尾部，新加的「缓存命中率」正好是最先消失的那一段（窄窗口
+     下等于没实现）。改成「放得下就单行、放不下就折行」，一行放不下时数字一个不丢。
+     ⚠️ 必须配 `word-break: keep-all`：默认 CJK 可在任意字符间断行，会把
+     「缓存命中率」劈成「缓存命 / 中率」；keep-all 让折行点只落在空格上 */
+  white-space: normal;
+  word-break: keep-all;
+  line-height: 1.5;
 }
 
 .viewer-main {

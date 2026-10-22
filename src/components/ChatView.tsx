@@ -22,6 +22,7 @@ import {
 import { Channel } from "../lib/channel";
 import { api } from "../lib/api";
 import { viewTransition } from "../lib/view-transition";
+import { cacheHitRate, fmtHitRate } from "../lib/token-stats";
 import AskQuestionCard, {
   parseAskQuestions,
   type AskQuestionItem,
@@ -168,6 +169,21 @@ function addUsage(a: ChatUsage, b: ChatUsage): ChatUsage {
     cacheReadInputTokens: a.cacheReadInputTokens + b.cacheReadInputTokens,
     cacheCreationInputTokens: a.cacheCreationInputTokens + b.cacheCreationInputTokens,
   };
+}
+
+/** 头部统计行尾部的缓存段：「 · 缓存读取 10.5M · 缓存命中率 92.1%」。
+ *  两个字段同一个闸门（cacheR > 0）——没读过缓存时既不该有「缓存读取 0」，
+ *  也不该有「命中率 0.0%」（首次冷启动轮的正常形态，不是异常要报出来）。
+ *  命中率分子分母必须取**同一口径**的三桶（输入 / 读缓存 / 写缓存），
+ *  见 lib/token-stats.ts 的注释 */
+function cacheStatSuffix(inTok: number, cacheR: number, cacheW: number): string {
+  if (!(cacheR > 0)) return "";
+  const rate = cacheHitRate({
+    inputTokens: inTok,
+    cacheReadInputTokens: cacheR,
+    cacheCreationInputTokens: cacheW,
+  });
+  return ` · 缓存读取 ${fmtTokens(cacheR)}${rate == null ? "" : ` · 缓存命中率 ${fmtHitRate(rate)}`}`;
 }
 
 /** 毫秒 → 「1m20s」/「45s」。子代理心跳用（task_progress 的 usage.duration_ms）。
@@ -2314,9 +2330,7 @@ export default function ChatView({
         // total 是分页窗口的状态（加载更早/更晚的判据），让它中途变大会把「加载更晚」
         // 按钮亮出来、把实时区已在渲染的消息再当历史载一遍（双渲染）
         count: `${stats.messageCount} 条消息`,
-        detail: `总计 ${fmtTokens(inTok + outTok + cacheR + cacheW)} · 输入 ${fmtTokens(inTok)} · 输出 ${fmtTokens(outTok)}${
-          cacheR > 0 ? ` · 缓存读取 ${fmtTokens(cacheR)}` : ""
-        }`,
+        detail: `总计 ${fmtTokens(inTok + outTok + cacheR + cacheW)} · 输入 ${fmtTokens(inTok)} · 输出 ${fmtTokens(outTok)}${cacheStatSuffix(inTok, cacheR, cacheW)}`,
       };
     }
     if (
@@ -2331,7 +2345,11 @@ export default function ChatView({
             liveTotal.outputTokens +
             liveTotal.cacheReadInputTokens +
             liveTotal.cacheCreationInputTokens,
-        )} · 输入 ${fmtTokens(liveTotal.inputTokens)} · 输出 ${fmtTokens(liveTotal.outputTokens)}`,
+        )} · 输入 ${fmtTokens(liveTotal.inputTokens)} · 输出 ${fmtTokens(liveTotal.outputTokens)}${cacheStatSuffix(
+          liveTotal.inputTokens,
+          liveTotal.cacheReadInputTokens,
+          liveTotal.cacheCreationInputTokens,
+        )}`,
       };
     }
     return null;
