@@ -84,11 +84,27 @@ export function renderCode({ text, lang }: { text: string; lang?: string }): str
 let installed = false;
 
 /**
- * 给全局 marked 装上高亮 renderer。幂等是必需的：`marked.use` 是全局副作用，
+ * 给全局 marked 装扩展。幂等是必需的：`marked.use` 是全局副作用，
  * HMR 或多次 import 会一层层叠加覆盖。
+ *
+ * 1) code renderer → 语法高亮（见 renderCode）。
+ * 2) del tokenizer 拦掉单 `~`：GFM 的删除线定界符是一或两个 `~`，而正文里的
+ *    单个 `~` 更常是约数/区间写法（`7~10ms`、`73~220 QPS`、`10~30%`），同一段
+ *    出现两个就会被配成一对、中间文字被划掉。这里刻意偏离 GFM：`~~` 开头的片段
+ *    交回内置 del（保留它对行内代码/链接/HTML 的掩蔽、嵌套平衡与标点 flanking
+ *    检查），单 `~` 原样输出。
  */
-export function installMarkdownHighlighting(): void {
+export function installMarkdownExtensions(): void {
   if (installed) return;
   installed = true;
-  marked.use({ renderer: { code: renderCode } });
+  marked.use({
+    renderer: { code: renderCode },
+    tokenizer: {
+      // `~~` 返回 false：回落内置实现。单 `~` 隐式返回 undefined：不回落，
+      // 由 text 规则原样输出——marked 只在扩展 tokenizer 返回 false 时采用默认实现。
+      del(src) {
+        if (src.startsWith("~~")) return false;
+      },
+    },
+  });
 }

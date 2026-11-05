@@ -5,7 +5,7 @@
 import { useMemo, type ReactNode } from "react";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
-import { installMarkdownHighlighting } from "../lib/highlight";
+import { installMarkdownExtensions } from "../lib/highlight";
 import { decorateCodeBlocks, installCodeCopy } from "../lib/code-copy";
 import { installCtrlLinkOpen, linkifyHtml } from "../lib/links";
 import { materializeListMarkers } from "../lib/list-markers";
@@ -19,9 +19,9 @@ import {
   WrenchIcon,
 } from "./Icons";
 
-// 给全局 marked 装代码块高亮（幂等，见 lib/highlight.ts）。放在模块顶层而非组件内：
-// marked.use 是全局副作用，且必须在首次 marked.parse 之前生效。
-installMarkdownHighlighting();
+// 给全局 marked 装扩展（代码高亮 + 删除线定界符收窄，幂等，见 lib/highlight.ts）。
+// 放在模块顶层而非组件内：marked.use 是全局副作用，且必须在首次 marked.parse 之前生效。
+installMarkdownExtensions();
 // 正文链接的 Ctrl+点击打开（幂等，见 lib/links.ts）：键盘/点击监听也是全局副作用，
 // 与上面同款「模块顶层装一次」。
 installCtrlLinkOpen();

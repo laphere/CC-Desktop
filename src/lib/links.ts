@@ -20,7 +20,7 @@
  *    外链同一条通道）。
  *    ⚠️ 按住态**不走 React state**：保活的非激活 tab（display:none）会跟着
  *    state 整棵消息树重渲染，长会话下按一次 Ctrl 白渲染两回；class + CSS 零渲染。
- *    与 lib/highlight.ts 的 installMarkdownHighlighting 同款「模块顶层装一次」
+ *    与 lib/highlight.ts 的 installMarkdownExtensions 同款「模块顶层装一次」
  *    模式（由 MessageParts.tsx 顶层调用）。
  */
 import { api } from "./api";
