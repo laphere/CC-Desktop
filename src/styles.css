@@ -3926,8 +3926,9 @@ html.ctrl-links .md-body a {
   background: none;
   border: none;
   outline: none;
-  /* 上 2 下 4：卡片已有 padding，这里只补首行与卡片上沿之间的一点呼吸 */
-  padding: 2px 4px 4px;
+  /* 上下各 2：卡片已有 padding，这里只补一点点呼吸；下边再厚会把「文字 ↔ 底部按钮条」
+     之间的空隙撑大（2026-11-08 用户反馈底下空白是多余的） */
+  padding: 2px 4px 2px;
 }
 
 .chat-input::placeholder {

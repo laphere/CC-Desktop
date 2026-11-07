@@ -325,11 +325,11 @@ const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp
 /** 单图大小上限：API 限 5MB，预留 base64 编码余量取 4.5MB */
 const IMAGE_MAX_BYTES = 4.5 * 1024 * 1024;
 
-/** 输入框高度（px）：空态约 2 行（58px，2026-09-22 从 78px 降 25%——空着时不需要那么高，
- *  一旦开始输入会立刻长上去），约 10 行封顶，再高就转内部滚动。
+/** 输入框高度（px）：初始态刚好两行（52px，2026-11-08 从 58px 微降——58 会多出近半行
+ *  空白，52 与两行内容贴齐），写第三行起才随内容长高，约 10 行封顶，再高就转内部滚动。
  *  数值按 .chat-input 的 14px / line-height 1.65（≈23px 一行）+ 上下内边距折算，
  *  **改那边的字号或行高就要回来改这里**。CSS 里刻意不写任何高度（原因见下）。 */
-const COMPOSER_MIN_H = 58;
+const COMPOSER_MIN_H = 52;
 const COMPOSER_MAX_H = 260;
 
 /** File → ChatImage（读为 base64 裸数据）；类型/大小不符时 toast 并返回 null */
@@ -1447,12 +1447,12 @@ export default function ChatView({
   /** 输入框随内容长高（到 COMPOSER_MAX_H 后由 .chat-input 的 overflow-y 接管滚动）。
    *  高度在这里算、不交给 CSS：元素上一旦有 min-height，被撑到 min 之后 scrollHeight
    *  至少等于 clientHeight，量出来的值恒 ≥ min，于是每敲一个字就多出边框那 2px。
-   *  useLayoutEffect 而非 useEffect —— 要在首次绘制前就把 1 行高撑到 3 行，否则会闪一下。 */
+   *  useLayoutEffect 而非 useEffect —— 要在首次绘制前就把高度定到位，否则会闪一下。 */
   useLayoutEffect(() => {
     const el = inputRef.current;
     if (!el) return;
     el.style.height = "auto"; // 先释放上一次的内联高度，scrollHeight 才是真实内容高
-    const want = el.scrollHeight + 2; // 上下各 1px 边框（box-sizing: border-box，scrollHeight 不含边框）
+    const want = el.scrollHeight + 2; // scrollHeight 把小数内容高取整，垫 2px 兜住零头，防差出的零点几像素触发滚动条
     el.style.height = `${Math.min(Math.max(want, COMPOSER_MIN_H), COMPOSER_MAX_H)}px`;
   }, [input, readOnly]);
 
