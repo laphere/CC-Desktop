@@ -401,7 +401,8 @@ export default function ChatView({
    *  不进任何累计——CLI 自己估的，供应商从不确认，进了总数轮末会「先涨后缩」 */
   const [thinkingTokens, setThinkingTokens] = useState<number | null>(null);
   /** 卡片中部那三样：模型名（init 上报）、思考强度（init.effort，可能拿不到）、
-   *  已用上下文（turn_end 的 per-turn usage ÷ 该轮的 contextWindow） */
+   *  已用上下文（context_usage 事件：起进程 / 轮内磁盘真值 / 轮末 summary 三处同一
+   *  事件链路——result 帧的 usage 是本轮调用之和，不能拿来折算占用率） */
   const [modelName, setModelName] = useState<string | null>(null);
   const [effort, setEffort] = useState<string | null>(null);
   const [ctx, setCtx] = useState<{ used: number; window: number } | null>(null);
@@ -906,8 +907,9 @@ export default function ChatView({
         setPlanBusy(false);
         break;
       case "context_usage":
-        // 后端在 init 一到和每轮结束各推一次：**进程一起来就有数**，不必等跑完一轮
-        // （用户要求「像终端状态行那样一启动就显示」）。顺带捎回模型名。
+        // 后端三处推、同值不重发：起进程 / 轮末各拉一次 summary（静止时点才可信），
+        // 轮进行中每 ~3s 读一次会话 jsonl 尾部的真值（流式帧被 CLI 清零，磁盘是
+        // 轮内唯一真值源）——长工具轮里进度条跟着走，不必等跑完一轮。顺带捎回模型名。
         if (ev.windowTokens > 0) {
           setCtx({ used: ev.usedTokens, window: ev.windowTokens });
         }
@@ -937,16 +939,10 @@ export default function ChatView({
         // scheduleStatsRefresh 注释）。挂 session（sessionFileRef）：新对话收编前
         // 没有文件可读，走 statLine 的实时兜底分支，不进这条路
         scheduleStatsRefresh();
-        // 已用上下文：turn_end 的 usage 是**本轮**的（result.usage 在流式会话里 per-turn），
-        // 把它三项 input 之和当成「当前上下文里有多少」；分母是该轮的 contextWindow。
-        // ⚠️ 别改用累计那份 —— 它越用越大
-        if (ev.usage && ev.contextWindow) {
-          const u = ev.usage;
-          setCtx({
-            used: u.inputTokens + u.cacheReadInputTokens + u.cacheCreationInputTokens,
-            window: ev.contextWindow,
-          });
-        }
+        // 已用上下文**不在这结算**：result.usage 是本轮全部 API 调用的 input 三项之和
+        // （头部「总计」的口径），一轮多次工具往返会远超窗口——拿它当上下文会在轮末
+        // 把进度条写满（2026-11-07 用户实测 18% → 100%）。收口由后端轮末拉的 summary
+        // 读数负责（context_usage 事件，与轮内磁盘真值同源同值，曲线不跳）。
         // 用户主动中断（停止钮 / Esc）时，CLI 回的 result 是 error_during_execution，
         // 于是 isError 为真 —— 那不是故障，别报成「本轮执行出错」
         if (ev.isError && !interruptedRef.current) onToast("本轮执行出错");

@@ -1,6 +1,10 @@
 // T1 三项新能力的后端用例（2026-09-24）：模型热切 / 斜杠命令 / 撤销本轮改动。
 // 模式照 chat-session.test.ts：mock 掉 SDK，假 Query 上 stub 新方法并记账。
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { mangleProjectPath } from "./mangle";
 
 const fake = vi.hoisted(() => ({
   /** query() 收到的 options（断言 enableFileCheckpointing 用） */
@@ -10,6 +14,9 @@ const fake = vi.hoisted(() => ({
   rewindCalls: [] as { uuid: string; dryRun: boolean }[],
   /** 置真后 rewindFiles 返回「失败」形状（canRewind:false + error） */
   failRewind: false,
+  /** getContextUsage 每次返回的已用 token（拨动它模拟读数变化）；置真后一直 reject */
+  ctxTokens: 5,
+  ctxFail: false,
   /** 往消息泵里塞一帧（init / result …） */
   push: null as null | ((m: unknown) => void),
 }));
@@ -59,11 +66,14 @@ vi.mock("@anthropic-ai/claude-agent-sdk", () => ({
           ? { canRewind: true, filesChanged: ["a.txt", "b.ts"], insertions: 3, deletions: 1 }
           : { canRewind: true, skippedLinks: 1 };
       },
-      getContextUsage: async () => ({
-        categories: [{ kind: "used", tokens: 5 }],
-        maxTokens: 100,
-        model: "m-std",
-      }),
+      getContextUsage: async () => {
+        if (fake.ctxFail) throw new Error("ctx probe unavailable");
+        return {
+          categories: [{ kind: "used", tokens: fake.ctxTokens }],
+          maxTokens: 1000,
+          model: "m-std",
+        };
+      },
       generateSessionTitle: async () => "标题",
     };
     return iterable;
@@ -426,5 +436,89 @@ describe("CLI 自发起轮的忙碌点亮（轮起点 init 注入 status:thinkin
     fake.push!({ type: "result", subtype: "error_during_execution", is_error: true });
     await sleep(20);
     expect(evs.filter((e) => e.type === "status")[2]).toEqual({ type: "status", state: "idle" });
+  });
+});
+
+describe("轮内上下文占用（jsonl 真值刷新 + 轮末 summary 收口）", () => {
+  const ctxEvents = (evs: ChatEvent[]) => evs.filter((e) => e.type === "context_usage");
+  const pushInit = (id: string) =>
+    fake.push!({
+      type: "system",
+      subtype: "init",
+      session_id: id,
+      model: "m-std",
+      permissionMode: "default",
+      tools: [],
+    });
+  /** 一条 assistant 行：首行 usage 恒 0（CLI 写盘的真实形态），收尾行带真值 */
+  const row = (tokens: number, cacheRead: number) =>
+    JSON.stringify({
+      type: "assistant",
+      message: {
+        id: "msg_1",
+        model: "m-std",
+        usage: {
+          input_tokens: tokens,
+          cache_read_input_tokens: cacheRead,
+          cache_creation_input_tokens: 0,
+          output_tokens: 1,
+        },
+      },
+    });
+
+  it("轮内从会话 jsonl 尾部读真值刷新（同值不重发），轮末 summary 收口后停", async () => {
+    // 会话文件 = $CLAUDE_CONFIG_DIR/projects/<mangle(cwd)>/<session_id>.jsonl
+    const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "ctx-disk-"));
+    const dir = path.join(fixtureRoot, "projects", mangleProjectPath(process.cwd()));
+    fs.mkdirSync(dir, { recursive: true });
+    const jsonl = path.join(dir, "ctx-disk.jsonl");
+    fs.writeFileSync(jsonl, `${row(0, 0)}\n${row(10, 20)}\n`);
+
+    const oldCfgDir = process.env.CLAUDE_CONFIG_DIR;
+    process.env.CLAUDE_CONFIG_DIR = fixtureRoot;
+    try {
+      vi.useFakeTimers();
+      const evs: ChatEvent[] = [];
+      const mgr = new ChatManager((_sid, ev) => evs.push(ev));
+      mgr.start("ctx-disk", { projectPath: process.cwd() });
+      await mgr.send("ctx-disk", "hi");
+      await vi.advanceTimersByTimeAsync(0); // 起进程那次 summary：used=5 window=1000
+      expect(ctxEvents(evs)).toEqual([
+        { type: "context_usage", usedTokens: 5, windowTokens: 1000, model: "m-std" },
+      ]);
+
+      pushInit("ctx-disk"); // session_ready：钉住 jsonl 路径 + 武装磁盘轮询
+      await vi.advanceTimersByTimeAsync(0);
+      expect(ctxEvents(evs)).toHaveLength(1); // 起轮当拍不刷新
+
+      await vi.advanceTimersByTimeAsync(3000); // 一拍：读到收尾行真值 10+20
+      expect(ctxEvents(evs)).toHaveLength(2);
+      expect(ctxEvents(evs)[1]).toMatchObject({ usedTokens: 30, windowTokens: 1000 });
+
+      await vi.advanceTimersByTimeAsync(6000); // 两拍读同一个数：同值不重发
+      expect(ctxEvents(evs)).toHaveLength(2);
+
+      fs.writeFileSync(jsonl, `${row(0, 0)}\n${row(10, 20)}\n${row(15, 30)}\n`); // 下一次调用完成
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(ctxEvents(evs)).toHaveLength(3);
+      expect(ctxEvents(evs)[2]).toMatchObject({ usedTokens: 45, windowTokens: 1000 });
+
+      fake.ctxTokens = 9;
+      fake.push!({
+        type: "result",
+        subtype: "success",
+        result: "ok",
+        user_message_uuids: ["u1"],
+      });
+      await vi.advanceTimersByTimeAsync(0); // 轮末：summary 收口 + 磁盘轮询收掉
+      expect(ctxEvents(evs)).toHaveLength(4);
+      expect(ctxEvents(evs)[3]).toMatchObject({ usedTokens: 9, windowTokens: 1000 });
+
+      await vi.advanceTimersByTimeAsync(9000); // 轮已结束：不再有刷新
+      expect(ctxEvents(evs)).toHaveLength(4);
+    } finally {
+      process.env.CLAUDE_CONFIG_DIR = oldCfgDir;
+      vi.useRealTimers();
+    }
   });
 });

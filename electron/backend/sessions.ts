@@ -615,6 +615,45 @@ export function parseUsage(v: unknown): Usage | null {
   };
 }
 
+/** 会话 jsonl 尾部读出的「当前上下文占用」。
+ *  ⚠️ 这是轮内持续刷新的**唯一真值源**：CLI 在流式侧把 assistant 帧 / message_start
+ *  的 usage 全部清零（2026-11-07 探针 %TEMP%\ctx-poll-probe\probe3 实测），磁盘 jsonl
+ *  是唯一落真值的地方——每条 assistant 消息完成写一行（input 三项 = 该次 API 调用的
+ *  实际输入 = 此刻的上下文），恰是上下文真实增长的时点。summary 读数（getContextUsage）
+ *  轮内是「已完成调用 + 本地估算」的噪声值，只在起进程 / 轮末两个静止时点可信。 */
+export interface TailContextUsage {
+  /** input + cache_read + cache_creation（最后一条带真值的 assistant 行） */
+  used: number;
+  /** 该行的模型名；取不到为 null */
+  model: string | null;
+}
+
+export function lastContextUsageFromTail(tail: string): TailContextUsage | null {
+  const lines = tail.split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const t = lines[i].trim();
+    if (!t.includes('"type":"assistant"')) continue;
+    let o: Json;
+    try {
+      o = JSON.parse(t) as Json;
+    } catch {
+      continue; // tail 边界的截断行，跳过
+    }
+    if (o.type !== "assistant") continue;
+    const msg = o.message;
+    if (!msg || typeof msg !== "object") continue;
+    const m = msg as Json;
+    const usage = parseUsage(m.usage);
+    // 只认收尾行（trio>0）：同一条消息会拆多行落盘，首行 usage 恒为 0
+    // （统计侧「收尾行优先」的同一事实）；倒着扫到第一条真值行 = 最近完成的调用
+    if (!usage) continue;
+    const used = usage.inputTokens + usage.cacheReadInputTokens + usage.cacheCreationInputTokens;
+    if (used <= 0) continue;
+    return { used, model: typeof m.model === "string" ? m.model : null };
+  }
+  return null;
+}
+
 /** 对**全量**消息聚合 token 统计（usage 在解析时就保留，分页切片不影响准确性）。
  *  同 id 的后续段 usage 为 null，故不会重复累加。 */
 export function aggregateUsage(messages: SessionMessage[]): SessionUsageStats {

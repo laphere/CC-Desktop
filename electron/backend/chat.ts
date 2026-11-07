@@ -16,6 +16,11 @@ import { randomUUID } from "node:crypto";
 import { spawn, execFileSync } from "node:child_process";
 // 起名失败退回兜底标题时与列表同一口径（首条消息的清洗规则）
 import { cleanSummary, extractXmlTag } from "./text";
+// 轮内上下文占用的真值源：会话 jsonl 尾部 assistant 收尾行的 usage（流式帧被 CLI
+// 清零、summary 读数轮内是估算噪声，见 docs/agent-sdk-capabilities.md §6.11）
+import { lastContextUsageFromTail, readHeadTail } from "./sessions";
+import { claudeProjectsDir } from "./paths";
+import { mangleProjectPath } from "./mangle";
 
 // 仅类型导入：编译期擦除，安全。
 import type {
@@ -180,10 +185,11 @@ export type ChatEvent =
       type: "turn_end";
       isError: boolean;
       resultText?: string | null;
-      /** 本轮（非累计）用量 */
+      /** 本轮（非累计）用量——⚠️ 它是**本轮全部 API 调用的 input 三项之和**（头部
+       *  「总计」的口径），不是「当前上下文里有多少」，别拿它折算占用率
+       *  （2026-11-07 用户实测：多调用工具轮把它当上下文，18% 直接写满 100%）。
+       *  上下文占用走 context_usage 事件 */
       usage?: ChatUsage | null;
-      /** 主模型的上下文窗口，做「已用上下文 %」的分母；取不到为 null */
-      contextWindow?: number | null;
     }
   | { type: "exited"; code: number | null; stderrTail?: string | null }
   | { type: "error"; message: string };
@@ -768,7 +774,6 @@ function translateResult(m: Rec): ChatEvent[] {
       isError,
       resultText: m.result != null ? String(m.result) : null,
       usage: parseUsage(m.usage),
-      contextWindow: contextWindowOf(m),
     },
     { type: "status", state: "idle" },
   ];
@@ -800,21 +805,6 @@ function taskActivity(m: Rec): ChatEvent {
     // 摘要可能很长（notification 的 summary 是模型写的一句话）；截断免得事件体撑爆
     summary: summary != null && summary.length > 200 ? summary.slice(0, 200) : summary,
   };
-}
-
-/** 主模型的上下文窗口（给「已用上下文 %」做分母）。
- *  modelUsage 是按模型字符串分组的：子代理/内部调用（如压缩、权限分类器）可能各占一条，
- *  所以取 input 用量最大的那条 —— 主循环的输入量必然压过它们；都没有就返回 null。 */
-function contextWindowOf(m: Rec): number | null {
-  const raw = m.modelUsage;
-  if (!raw || typeof raw !== "object") return null;
-  let best: Rec | null = null;
-  for (const u of Object.values(raw as Record<string, Rec>)) {
-    if (!u || typeof u !== "object") continue;
-    if (best === null || Number(u.inputTokens ?? 0) > Number(best.inputTokens ?? 0)) best = u;
-  }
-  const n = Number(best?.contextWindow ?? 0);
-  return Number.isFinite(n) && n > 0 ? n : null;
 }
 
 // ---------------- settings 默认权限档解析 ----------------
@@ -1041,6 +1031,12 @@ class MessageQueue implements AsyncIterable<SDKUserMessage> {
 const GRACEFUL_CLOSE_MS = 3000;
 /** app 退出时整体等待上限（各会话并行关；超时后统一强杀，不能让退出被卡住的子进程拖住） */
 const GRACEFUL_QUIT_MS = 3000;
+/** 轮内上下文占用刷新间隔。轮内读**会话 jsonl 尾部**拿真值：CLI 每条 assistant 消息
+ *  完成就落一行真实 usage（input 三项 = 此刻上下文），恰是上下文真实增长的时点；
+ *  流式侧同帧的 usage 被 CLI 清零、summary 读数（getContextUsage）轮内是
+ *  「已完成调用 + 本地估算」的噪声值（2026-11-07 用户实测轮内 42%→59%、真值 53%），
+ *  只在起进程与轮末两个静止时点可信。三处共用 emitCtxValues 做同值去重。 */
+const CTX_DISK_POLL_INTERVAL_MS = 3000;
 
 /** 一个活跃对话（对应一个 CLI 子进程；懒启动：首条 send 才 spawn） */
 class ChatSession {
@@ -1102,6 +1098,20 @@ class ChatSession {
   /** 轮次是否在跑（init 起轮 / result 或 interrupt 收轮）：给「CLI 自己发起的轮」
    *  点亮前端忙碌态用，见 iterate 里的轮起点注入。 */
   private turnActive = false;
+  /** 轮内上下文占用刷新定时器：轮起点武装、turn_end / interrupt / 进程退出收掉
+   *  （CTX_DISK_POLL_INTERVAL_MS 节奏，读会话 jsonl 尾部的真值，见常量处口径）。 */
+  private ctxDiskTimer: ReturnType<typeof setInterval> | null = null;
+  /** 会话 jsonl 绝对路径（首帧 session_ready 就钉下来；resume 时 init.session_id
+   *  才是真正的会话 id——this.id 只是 tab 键、新会话时两者才相同）。 */
+  private sessionFile: string | null = null;
+  /** 最近一次 summary 读数给出的窗口（maxTokens）：轮内 jsonl 真值要拿它做分母；
+   *  没拿到（老 CLI 无 getContextUsage）就整段不做轮内刷新——只有真值没有分母，
+   *  百分比算不出来，别发个前端永远不显示的数。 */
+  private ctxWindowTokens: number | null = null;
+  /** 最近一次下发的 context_usage（同值去重用）：上下文只在 assistant 消息完成时
+   *  真正增长，轮内大多数拍读到的值与上一发相同——值没变就不发事件，省得前端
+   *  为一成不变的数字付一次整页 renderStream（安静期：长命令执行 / 等权限卡）。 */
+  private ctxLastEmitted: { used: number; window: number; model: string | null } | null = null;
   /** 本进程是否成功投递过至少一条用户消息。预热不对应任何轮：实测（2026-10-10 探针
    *  %TEMP%\prewarm-init-probe\，bench 入口 + CLI 2.1.283 + resume）预热窗口内一条
    *  init 都不发（与 docs/agent-sdk-capabilities.md §8.9 一致），此闸门纯防御——CLI
@@ -1232,6 +1242,7 @@ class ChatSession {
   private emitExited(code: number | null): void {
     if (this.exited) return;
     this.exited = true;
+    this.stopCtxDiskPoll(); // 进程没了，刷新定时器留着只会每拍白跑一次防御分支
     for (const w of this.exitWaiters) w();
     this.exitWaiters.length = 0;
     this.emit({ type: "exited", code, stderrTail: null });
@@ -1249,6 +1260,21 @@ class ChatSession {
         const hasInit = translated.some((e) => e.type === "session_ready");
         if (hasInit && this.claimTitleAsk()) {
           void this.generateTitle();
+        }
+        // 首帧 init 把会话文件路径钉下来（轮内上下文真值读它的尾部）：resume 时
+        // init.session_id 才是真正的会话 id（this.id 只是 tab 键），以帧上报的为准。
+        // session_ready = 首条用户消息已被处理、jsonl 已存在（见上），此刻文件必有。
+        if (hasInit && this.sessionFile === null) {
+          const ready = translated.find(
+            (e): e is ChatEvent & { type: "session_ready" } => e.type === "session_ready",
+          );
+          if (ready && ready.sessionId) {
+            this.sessionFile = path.join(
+              claudeProjectsDir(),
+              mangleProjectPath(this.projectPath),
+              `${ready.sessionId}.jsonl`,
+            );
+          }
         }
         // CLI 自己发起的轮没有 send() 帮前端置忙：后台任务（子代理）完成时 CLI 会把
         // <task-notification> 当作新 prompt 自己开一轮，而前端的忙碌态只认「自己 send」
@@ -1270,11 +1296,16 @@ class ChatSession {
         }
         if (events.some((e) => e.type === "turn_end")) {
           this.turnActive = false;
+          // 轮内刷新收掉：轮末的 summary 收口由下方 pull 负责（同值去重兜住重复帧）
+          this.stopCtxDiskPoll();
         } else if (
           turnStarted ||
           events.some((e) => e.type === "status" && e.state === "thinking")
         ) {
-          // 老 CLI 不发每轮 init 时，message_start 的 thinking 也算轮起点
+          // 老 CLI 不发每轮 init 时，message_start 的 thinking 也算轮起点。
+          // 磁盘轮询只随 false→true 的跳变武装一次：轮中每条 message_start 的
+          // thinking 都会再进这个分支，不能把定时器叠起来
+          if (!this.turnActive) this.startCtxDiskPoll();
           this.turnActive = true;
         }
         for (const e of events) this.emit(e);
@@ -1290,8 +1321,12 @@ class ChatSession {
           const uuid = Array.isArray(uuids) && uuids.length > 0 ? String(uuids[0]) : single;
           if (typeof uuid === "string" && uuid) this.lastTurnUserUuid = uuid;
         }
-        // 每轮结束刷一次上下文占用（起进程那次由 start() 里的 pullContextUsageSoon 负责，
-        // 因为 init 要等第一条消息才到 —— 光靠这里会漏掉"一启动就显示"）。
+        // 每轮结束拉一次 summary 读数收口（起进程那次由 start() 里的 pullContextUsageSoon
+        // 负责 —— init 要等第一条消息才到，光靠这里会漏掉"一启动就显示"；轮进行中的
+        // 持续刷新由 startCtxDiskPoll 读 jsonl 尾部负责，见 CTX_DISK_POLL_INTERVAL_MS）。
+        // ⚠️ 别用 result 帧的 usage 折算占用率：它是**本轮全部 API 调用的 input 三项
+        // 之和**（头部「总计」的口径），多调用工具轮会远超窗口——2026-11-07 用户实测，
+        // 旧代码拿它当「当前上下文」，18% 一轮结束直接写满 100%。
         // 放在这里而不是 translator 里：那层是纯翻译，而 getContextUsage 要 this.query。
         if (events.some((e) => e.type === "turn_end")) {
           this.roundIndex++; // 轮次边界：起名的补问档位按它发放（见 titleAskRound）
@@ -1331,9 +1366,11 @@ class ChatSession {
    *  · 已用量取 `categories` 里 `kind === 'used'` 之和 —— d.ts 明确要求按 `kind` 分类、
    *    **别按英文名判**（`/context` 那套分类：used/free/buffer/deferred，
    *    其中 buffer 是压缩预留，不该算进「已用」）。
-   *  · 整个函数静默：这是锦上添花的读数，拿不到就算了（前端还有 turn_end 那条兜底）。
-   *  ⚠️ 该 API 在 docs/agent-sdk-capabilities.md 里标「型」（只看了类型、没跑过），
-   *  所以前端保留了从 turn_end 推导的旧路径作兜底，两条写同一个状态。 */
+   *  · 整个函数静默：这是锦上添花的读数，拿不到就算了。
+   *  调用时机：起进程（重试一次）、每轮结束两处——都是静止时点（轮内的持续刷新走
+   *  磁盘真值 pollCtxFromDisk，summary 在轮内是「已完成调用 + 本地估算」的噪声值，
+   *  2026-11-07 用户实测轮内会读出比真值高的野数）。窗口记进 ctxWindowTokens 供
+   *  磁盘真值当分母。 */
   private async emitContextUsage(): Promise<boolean> {
     const q = this.query;
     if (!q || this.exited) return false;
@@ -1344,25 +1381,20 @@ class ChatSession {
         .reduce((n, c) => n + Number(c.tokens ?? 0), 0);
       const window = Number(u.maxTokens ?? 0);
       if (window <= 0) return false;
-      this.emit({
-        type: "context_usage",
-        usedTokens: used,
-        windowTokens: window,
-        model: u.model ? String(u.model) : null,
-      });
+      this.ctxWindowTokens = window;
+      this.emitCtxValues(used, window, u.model ? String(u.model) : null);
       return true;
     } catch (e) {
-      // 不致命、也不弹给用户（前端还有 turn_end 那条兜底），但**留一行 warn**：
-      // 这是个标「型」的 API（见 docs/agent-sdk-capabilities.md §9.5），
-      // 哪天 CLI 不再提供、口径变了，就只有这里看得出来。与本文件里
-      // generateTitle 的失败处理同一口径（降级但可见）。ASCII 输出：
-      // 中文在这台机器的控制台里会被按 GBK 解成乱码。
+      // 不致命、也不弹给用户，但**留一行 warn**：哪天 CLI 不再提供、口径变了，
+      // 就只有这里看得出来。与本文件里 generateTitle 的失败处理同一口径
+      // （降级但可见）。ASCII 输出：中文在这台机器的控制台里会被按 GBK 解成乱码。
       console.warn("[chat] getContextUsage failed:", e);
       return false;
     }
   }
 
-  /** 进程刚起就把上下文占用拉一次（顺带把模型名带回来）。
+  /** 进程刚起就把上下文占用拉一次（顺带把模型名和**窗口**带回来——轮内磁盘真值
+   *  的分母就是它）。
    *  ⚠️ 为什么必须主动问、不能等事件：`system/init` 要等**第一条用户消息**才到 ——
    *  实测（2026-09-22）预热完成后进程已起，但一条 init/result 都没有，所以挂在
    *  `session_ready` 上的那次刷新永远不触发，「一启动就显示」也就无从谈起。
@@ -1374,6 +1406,43 @@ class ChatSession {
       if (await this.emitContextUsage()) return;
       await new Promise((r) => setTimeout(r, 800));
     }
+  }
+
+  /** 轮内上下文刷新三件套 + 三处共用的下发口。轮内读会话 jsonl 尾部的磁盘真值
+   *  （CTX_DISK_POLL_INTERVAL_MS 节奏）；summary（起进程 / 轮末）与磁盘真值写的是
+   *  同一条 context_usage 事件链路，前端零改动。 */
+  private startCtxDiskPoll(): void {
+    if (this.ctxDiskTimer || this.exited) return;
+    this.ctxDiskTimer = setInterval(() => this.pollCtxFromDisk(), CTX_DISK_POLL_INTERVAL_MS);
+    this.ctxDiskTimer.unref?.(); // 不挡进程退出（测试里会话对象不关也不挂住 worker）
+  }
+
+  private stopCtxDiskPoll(): void {
+    if (this.ctxDiskTimer) {
+      clearInterval(this.ctxDiskTimer);
+      this.ctxDiskTimer = null;
+    }
+  }
+
+  /** 轮内一拍：读会话 jsonl 尾部，把最后一条 assistant 收尾行的 usage 三项发出去。
+   *  与列表轻读同款的同步 64KB 尾读，毫秒级。行没落（当前消息还在流式，尾部只有
+   *  usage 为 0 的中间行）、窗口未知（summary 一次都没成功过）都静默跳过，下拍再来。
+   *  文件路径在 session_ready 才钉下来，理论到不了 sessionFile 为空的分支，防御留着。 */
+  private pollCtxFromDisk(): void {
+    if (this.exited || this.sessionFile === null || this.ctxWindowTokens === null) return;
+    const ht = readHeadTail(this.sessionFile);
+    const r = ht ? lastContextUsageFromTail(ht.tail) : null;
+    if (r) this.emitCtxValues(r.used, this.ctxWindowTokens, r.model);
+  }
+
+  /** 三处共用下发口：同值不重发 —— 上下文只在 assistant 消息完成时真正增长，
+   *  读数没变就不发事件，省得前端为一成不变的数字付一次整页 renderStream
+   *  （安静期：长命令执行 / 等权限卡 / 长思考间歇）。 */
+  private emitCtxValues(used: number, window: number, model: string | null): void {
+    const last = this.ctxLastEmitted;
+    if (last && last.used === used && last.window === window && last.model === model) return;
+    this.ctxLastEmitted = { used, window, model };
+    this.emit({ type: "context_usage", usedTokens: used, windowTokens: window, model });
   }
 
   /** 记下本 sitting 第一条非空用户文本（新建会话的 AI 标题描述用它）。
@@ -1510,6 +1579,7 @@ class ChatSession {
     // 反例），turnActive 卡真会让下一个自发起轮的 init 被当成「轮中帧」漏点亮。
     // result 稍后到时只是再置一次 false，幂等
     this.turnActive = false;
+    this.stopCtxDiskPoll(); // 与 turnActive 同进退：中断后没有「轮内」可言
     if (this.delivering > 0) this.interruptRequested = true;
   }
 

@@ -299,10 +299,12 @@ export type ChatEvent =
       summary?: string | null;
     }
   | {
-      /** 上下文占用（`Query.getContextUsage()` 的读数），init 一到与每轮结束各推一次。
-       *  用户要求「像终端状态行那样一启动就有」，所以不能等第一轮跑完。
+      /** 上下文占用。后端三处推、同值不重发：起进程 / 轮末各拉一次 summary（静止
+       *  时点才可信），轮进行中每 ~3s 读一次会话 jsonl 尾部的真值（CLI 在流式帧上
+       *  把 usage 清零，磁盘 assistant 收尾行是轮内唯一真值源）——长工具轮里进度条
+       *  持续走动，不必等跑完一轮（用户要求「像终端状态行那样一启动就有」）。
        *  ⚠️ 这里送的是**原始数字**而不是 API 的 `percentage` —— 那个字段是 0-100 还是
-       *  0-1 没验过（该 API 在 docs/agent-sdk-capabilities.md 里标「型」），
+       *  0-1 没验过（见 docs/agent-sdk-capabilities.md §6.11），
        *  前端自己算比值，单位问题就不存在了 */
       type: "context_usage";
       usedTokens: number;
@@ -334,12 +336,11 @@ export type ChatEvent =
       type: "turn_end";
       isError: boolean;
       resultText?: string | null;
-      /** ⚠️ 本轮（不是累计）的用量：result.usage 在流式会话里就是 per-turn 的，
-       *  所以 input+cache 三项之和 ≈ 当前上下文已占用的量，做百分比要用它。
-       *  别拿 message_complete 那条（前端是累加的，越用越大） */
+      /** 本轮（非累计）用量，只做头部「总计」的轮末结算。⚠️ 它是**本轮全部 API 调用
+       *  的 input 三项之和**（一轮里多次往返就多次累加），不是「当前上下文里有多少」
+       *  ——多调用工具轮会远超窗口，别拿它折算占用率（2026-11-07 用户实测 18% 一轮
+       *  结束写满 100%）。上下文占用走 context_usage 事件 */
       usage?: ChatUsage | null;
-      /** 主模型的上下文窗口（result.modelUsage 里那条的 contextWindow）；取不到为 null */
-      contextWindow?: number | null;
     }
   | { type: "exited"; code: number | null; stderrTail?: string | null }
   | { type: "error"; message: string };

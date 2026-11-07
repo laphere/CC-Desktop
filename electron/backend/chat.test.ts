@@ -286,33 +286,9 @@ describe("result 收尾", () => {
       }),
     );
     expect(out).toEqual([
-      { type: "turn_end", isError: false, resultText: "完成", usage: { inputTokens: 10, outputTokens: 5, cacheReadInputTokens: 2, cacheCreationInputTokens: 1 }, contextWindow: null },
+      { type: "turn_end", isError: false, resultText: "完成", usage: { inputTokens: 10, outputTokens: 5, cacheReadInputTokens: 2, cacheCreationInputTokens: 1 } },
       { type: "status", state: "idle" },
     ]);
-  });
-
-  it("contextWindow 取 modelUsage 里 input 用量最大的那条（子代理会各占一条）", () => {
-    const t = new SdkMessageTranslator();
-    const out = t.translate(
-      msg({
-        type: "result",
-        subtype: "success",
-        result: "完成",
-        is_error: false,
-        usage: { input_tokens: 1 },
-        modelUsage: {
-          "claude-haiku-x": { inputTokens: 20, contextWindow: 200000 },
-          "deepseek-v4.1-flash[1m]": { inputTokens: 900, contextWindow: 1000000 },
-        },
-      }),
-    );
-    expect(out[0]).toMatchObject({ type: "turn_end", contextWindow: 1000000 });
-  });
-
-  it("contextWindow 缺失 / 非正数 → null（前端据此不显示百分比）", () => {
-    const t = new SdkMessageTranslator();
-    expect(t.translate(msg({ type: "result", subtype: "success", is_error: false, modelUsage: { m: { inputTokens: 5 } } }))[0]).toMatchObject({ contextWindow: null });
-    expect(t.translate(msg({ type: "result", subtype: "success", is_error: false, modelUsage: { m: { inputTokens: 5, contextWindow: 0 } } }))[0]).toMatchObject({ contextWindow: null });
   });
 
   it("error_during_execution → isError true", () => {

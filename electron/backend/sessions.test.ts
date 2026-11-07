@@ -9,6 +9,7 @@ import {
   appendCustomTitle,
   extractFirstPrompt,
   getSessionMessages,
+  lastContextUsageFromTail,
   sessionStats,
   listSessions,
   parseContentBlocks,
@@ -776,5 +777,49 @@ describe("sessionFileAndTitle", () => {
 
   it("非法 id 不进路径（与 sessionTitleFor 同一注入面）", () => {
     expect(() => sessionFileAndTitle(projects, "D:\\proj", "../evil")).toThrow();
+  });
+});
+
+describe("lastContextUsageFromTail（轮内上下文真值）", () => {
+  const row = (input: number, cacheRead: number, model = "m-std") =>
+    JSON.stringify({
+      type: "assistant",
+      message: {
+        id: "msg_1",
+        model,
+        usage: {
+          input_tokens: input,
+          cache_read_input_tokens: cacheRead,
+          cache_creation_input_tokens: 0,
+          output_tokens: 1,
+        },
+      },
+    });
+
+  it("取最后一条带真值的 assistant 行：input+cache 三项之和", () => {
+    const tail = `${row(0, 0)}\n${row(742, 262528)}\n`;
+    expect(lastContextUsageFromTail(tail)).toEqual({ used: 263270, model: "m-std" });
+  });
+
+  it("跳过 usage 全 0 的行（同消息多行落盘时首行恒 0）与末尾截断行", () => {
+    const tail = `${row(10, 20)}\n${row(0, 0)}\n{"type":"assistant","message":{"id":"x",`;
+    expect(lastContextUsageFromTail(tail)).toEqual({ used: 30, model: "m-std" });
+  });
+
+  it("新嵌套格式（usage.input_tokens 是对象）同样能取到", () => {
+    const nested = JSON.stringify({
+      type: "assistant",
+      message: {
+        id: "msg_2",
+        model: "glm-x",
+        usage: { input_tokens: { input: 5, cache_read: 30, cache_creation: 2 }, output_tokens: 1 },
+      },
+    });
+    expect(lastContextUsageFromTail(`${nested}\n`)).toEqual({ used: 37, model: "glm-x" });
+  });
+
+  it("尾部没有带真值的 assistant 行 → null（轮内刷新据此静默跳过）", () => {
+    expect(lastContextUsageFromTail('{"type":"user","message":{"role":"user"}}\n')).toBeNull();
+    expect(lastContextUsageFromTail("")).toBeNull();
   });
 });

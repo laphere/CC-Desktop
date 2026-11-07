@@ -329,6 +329,8 @@ getContextUsage({ detail: 'summary' })
 - **`percentage` 字段的单位没验**（0-100 还是 0-1）——所以对话层**不转发它**，只把 `usedTokens`/`windowTokens` 两个原始数送给前端自己算比值。要用 `percentage` 先确认单位。
 - **返回里带 `model`** ✓——比只靠 `system/init` 更早拿到模型名（原因见 §8 第 9 条）。
 - **调用时机**：`detail:'summary'` 在**一轮都没跑过**时也返回（新会话是 0%），所以「进程一起来就显示」是能做到的——但必须**主动问**，不能挂在 init 事件上（§8 第 9 条）。刚 `query()` 完的那一瞬间可能撞上传输层 initialize 握手，对话层因此试两次（间隔 800ms）。
+- **⚠️ summary 只在静止时点可信，轮内是噪声（2026-11-07 用户实测+探针 `%TEMP%\ctx-poll-probe\`）**：它的口径是「已完成调用 usage + 本地估算」——轮内会随估算波动（用户观察：真值 53% 的轮里轮内读到 42%→59%；探针同一轮内 4.2%→4.9% 反复回摆），且滞后于工具结果的写入（4 次 30K 字符的工具往返后，真值 ≈72K，它还在读 49K）。轮内的持续刷新**不能靠它**。
+- **轮内真值在磁盘 jsonl，不在流里（2026-11-07 探针 probe3）**：流式侧 `assistant` 帧与 `message_start` 的 usage 被 CLI **清零**（`input_tokens=0`、cache 字段缺失），`result` 帧的 usage 又是「本轮全部 API 调用的 input 三项之和」（≠当前上下文）。唯一真值源是会话 jsonl：每条 assistant 消息完成落一行（收尾行带真实 input+cache 三项，与静止 summary/重进会话看到的值逐位吻合——实测 263,270 tokens ↔ 26%×1M）。对话层据此设计（`chat.ts` 的 `startCtxDiskPoll`）：轮内每 3s 读 jsonl 尾部 64KB 取最后一条真值行（`sessions.ts` 的 `lastContextUsageFromTail`），summary 只在起进程（顺带拿窗口）与轮末收口两个静止时点拉；三处共用同值去重，读数没变不发事件。另两个连带教训：① 旧对话层把 result.usage 三项和除以窗口当占用率，18% 一轮结束写满 100%（多调用轮求和远超窗口）——已删；② summary 的 `maxTokens` 是窗口分母的唯一来源（轮内 jsonl 只有分子），拿不到窗口就不做轮内刷新。
 
 ### 6.12 会话标题：`generateSessionTitle()`（**实**，2026-09-22；2026-09-27 订正）
 
