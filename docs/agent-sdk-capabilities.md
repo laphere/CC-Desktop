@@ -23,13 +23,13 @@
 | 项 | 值 | 说明 |
 |---|---|---|
 | SDK 版本 | `0.3.302` | `package.json` 的 `version`（2026-10-17 由 0.3.278 升上来） |
-| 对应 CLI | `2.1.302` | `package.json` 的 `claudeCodeVersion` + `manifest.json` 的 `version`，两处一致；**本机实际跑的那份 CLI 也是 2.1.302，两者已对齐** |
+| 对应 CLI | `2.1.302` | `package.json` 的 `claudeCodeVersion` + `manifest.json` 的 `version`，两处一致；**本机实际跑的那份 CLI 是 2.1.319（2026-11-07 复核），版本号已不再逐字对齐**——app 只认本机 CLI，升级时各自回归 |
 | 原生二进制 | `optionalDependencies` 列 8 个平台包 | npm 只装匹配本机的那一个（win32-x64 的 `claude.exe` 290MB）。**2026-09-23 起从 `build.files` 排除、不进安装包**——对话层只认本机 claude（§8 第 5 条），安装包不再因它变大 |
 | peerDependencies | `@anthropic-ai/sdk >=0.93.0`、`@modelcontextprotocol/sdk ^1.29.0`、`zod ^4.0.0` | **都不在本仓 `package.json` 的 dependencies 里**，是 npm 7+ 自动装的 peer。本机 zod 实际是 `4.6.5` |
 
 > ⚠️ **想用 `tool()` / `createSdkMcpServer()`（§6.2）就得显式把 `zod` 与 `@modelcontextprotocol/sdk` 加进 `dependencies`**。现在是传递装进来的，`npm install` 时解析不到就会炸；靠「本机恰好有」不是依赖声明。
 
-**版本对齐是硬约束**：SDK 与 CLI 是同一份协议的两端，`manifest.json` 里的 `sdkCompat.testedWrapperVersions` 记录了测过的 wrapper 版本区间。升 SDK 必须成对升 CLI（或反过来），否则会出现「flag 传了没反应」这类静默失配（`--permission-prompt-tool` 就是未正式列出的 CLI 面，升级时值得回归）。**CLI 侧的兼容是单向的**：CLI 2.1.302 的清单里仍列着 0.3.278（旧 wrapper 还能跑），但 0.3.278 的清单只测到 0.3.277 wrapper——即「新 CLI 认旧 wrapper」成立、「旧 CLI 认新 wrapper」不保证。
+**协议对齐是硬约束**：SDK 与 CLI 是同一份协议的两端，`manifest.json` 里的 `sdkCompat.testedWrapperVersions` 记录了测过的 wrapper 版本区间。版本号不必逐字相同（本机 CLI 可以高于 SDK manifest 记录的对应版本），但升级任一端都要回归协议面，否则会出现「flag 传了没反应」这类静默失配（`--permission-prompt-tool` 就是未正式列出的 CLI 面，升级时值得回归）。**CLI 侧的兼容是单向的**：CLI 2.1.302 的清单里仍列着 0.3.278（旧 wrapper 还能跑），但 0.3.278 的清单只测到 0.3.277 wrapper——即「新 CLI 认旧 wrapper」成立、「旧 CLI 认新 wrapper」不保证。
 
 ## 1. 六个入口
 
@@ -164,6 +164,7 @@ queue.push({ type: "user", message: { role: "user", content: "…" }, parent_too
 - **`system` / `subtype: 'status'` 带 `permissionMode`**（2026-09-22 实测，本项目已用）：CLI 把「模式变了」压在这帧上，**与工具结果同刻到达**——`EnterPlanMode` 生效时报 `plan`、批准 `ExitPlanMode` 时报回 prePlanMode。底部模式选择器要跟手就得吃这帧（本项目走 `permission_mode` 事件，见 `chat.ts` 的 `translateSystem`）。注意 `status: 'requesting'` 那类帧 `permissionMode` 为 `undefined`，有才认。
 - **`prompt_suggestion`**：每轮**最多一条、且在 `result` 之后到达**——所以消费端必须在拿到 `result` 之后**继续迭代流**，否则永远收不到（想要「下一句猜你想问什么」的 UI 才需要）。
 - **`rate_limit_event` + §1 的 `USAGE_*_PREFIXES`**：配额类 UI 的两块料。
+- **`system` / `subtype: 'api_retry'`**（2026-11-07 实测 CLI 2.1.319，本项目已用）：可重试错误（连接被拒 / 超时 / 限流 / 5xx）每失败一次发一帧，字段 `attempt` / `max_retries` / `retry_delay_ms` / `error_status` / `error`。**`error_status` 为 null = 连接层错误（没有 HTTP 响应）**，此时 `error` 通常是 `"unknown"`——别当成「未知状态」。实测连不上时连发 10 次、退避 0.5s→39s；耗尽后先来一条 `is_api_error_message:true`、`error:"server_error"` 的合成 assistant 文本（正文就是错误原因），再回 `result.is_error:true`——**此时 `subtype` 仍是 `"success"`**，判失败只能看 `is_error`。`no_response` 存在时是「首字节窗口内没等到响应头」，此时 `retry_wait_ms` 才是下一次等待、`max_retries` 是该原因自己的小上限。本项目翻成 `api_retry` 事件供状态胶囊显示「连接失败 · 重试 N/M」并逐秒倒计时（`no_response` 时改显「响应超时」，见 `chat.ts` 的 `translateSystem`）。另：`SDKResultError`（`error_max_turns` / `error_during_execution` 等）**没有 `result` 字段**，错误原因只在 `errors[]` 里——本项目 `translateResult` 在 `result` 为空时回退取 `errors[0]`。
 - **0.3.302 补齐的字段**（类型面新增，CLI 早就在发）：`task_*` 与 `background_tasks_changed` 条目带 `run_id`（同一次运行的所有帧同值，resume 换新值）、`parent_task_id`、`subagent_type`；assistant / user 帧带 `agent_id`（哪个子代理产出的）；`conversation_reset` 带 `trigger`（`clear` / `plan_mode_exit` / `fresh_session` / `onboarding`）与 `user_message_uuid`；init 带 `view_mode`（`focus` / `default`）与 `plugin_errors`；result 带 `first_text_post_queue_wait_ms`；usage 带 `fallback_credit`、`overageEnabled`；`SDKControlInitializeResponse` 带 `claude_code_version`。
 
 ## 6. 能力专题

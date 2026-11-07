@@ -3295,7 +3295,10 @@ html.ctrl-links .md-body a {
   background: var(--accent-soft);
 }
 
-.chat-status-exited {
+/* 已退出与「连接失败、自动重试中」同属异常态，共用 danger 配色；收尾摘除由状态机
+   负责（exited / thinking / idle 整对象替换），不长期占着红色 */
+.chat-status-exited,
+.chat-status-retry {
   color: var(--danger);
   border-color: var(--danger-soft);
   background: var(--danger-soft);

@@ -23,6 +23,12 @@ import { Channel } from "../lib/channel";
 import { api } from "../lib/api";
 import { viewTransition } from "../lib/view-transition";
 import { cacheHitRate, fmtHitRate } from "../lib/token-stats";
+import {
+  apiRetryDelayMs,
+  apiRetryStatusText,
+  apiRetryTooltip,
+  type ApiRetryEvent,
+} from "../lib/api-retry";
 import AskQuestionCard, {
   parseAskQuestions,
   type AskQuestionItem,
@@ -245,7 +251,15 @@ const REPLY_EVENTS = new Set<ChatEvent["type"]>([
 type ChatStatus =
   | { phase: "idle" }
   | { phase: "starting" }
-  | { phase: "thinking" }
+  | {
+      phase: "thinking";
+      /** 模型请求失败、CLI 自动重试的状态（api_retry 事件）。重试属于正在跑的轮次，
+       *  只在 thinking 上挂载：迟到的帧不会把空闲/已退出的会话重新点亮。退避等待期
+       *  CLI 不发任何帧，这行是唯一的「还在重连」信号；随整个 status 被替换/丢弃
+       *  （新的 thinking、idle、exited），不需要单独的清除路径。
+       *  receivedAt 是前端收到帧的时刻，用于把 CLI 给的退避换算成逐秒倒计时 */
+      retry?: ApiRetryEvent & { receivedAt: number };
+    }
   | { phase: "exited"; code: number | null; stderrTail?: string | null };
 
 /** 变更文件：聚合 Edit/Write/MultiEdit 的 file_path（msgIdx = 历史全局序号，实时消息为 null） */
@@ -719,6 +733,9 @@ export default function ChatView({
         }));
         break;
       case "status":
+        // 收到 status 即轮次状态推进（thinking = 模型开始回话 / idle = 本轮结束）。
+        // 重试态挂在 status.thinking 上，这里的整对象替换会把 retry 一并丢掉；
+        // 重试等待期 CLI 只发 api_retry、不发 status，不会误清
         if (ev.state === "thinking") {
           setStatus({ phase: "thinking" });
         } else {
@@ -880,6 +897,13 @@ export default function ChatView({
       case "thinking_tokens":
         setThinkingTokens(ev.estimated);
         break;
+      case "api_retry":
+        // 只挂到「正在跑的轮次」上。函数式更新基于最新状态：exited 之后才到的缓冲帧
+        // 自然被挡掉（不依赖 effect 事后同步的 ref，避免 exited 与重试帧同批到达时
+        // 把死会话重新点亮）。这里**不翻 phase**——重试帧属于当前轮，若状态已 idle，
+        // 说明是迟到帧，拉起一个没有轮次的「思考中」只会拦发送、给一个停不掉的停止键
+        setStatus((s) => (s.phase === "thinking" ? { ...s, retry: { ...ev, receivedAt: Date.now() } } : s));
+        break;
       case "permission_request":
         // 提问单独成卡（选项有语义，不能当普通工具卡把 input 打成 JSON 丢给用户看）
         if (ev.toolName === "AskUserQuestion") {
@@ -945,7 +969,16 @@ export default function ChatView({
         // 读数负责（context_usage 事件，与轮内磁盘真值同源同值，曲线不跳）。
         // 用户主动中断（停止钮 / Esc）时，CLI 回的 result 是 error_during_execution，
         // 于是 isError 为真 —— 那不是故障，别报成「本轮执行出错」
-        if (ev.isError && !interruptedRef.current) onToast("本轮执行出错");
+        if (ev.isError && !interruptedRef.current) {
+          // 原因在 resultText 里（连接失败 / 认证失败 / 重试耗尽的错误正文）。只说
+          // 「执行出错」等于让用户去猜；toast 是单行短句的容器，所以只取首行、按码点
+          // 截断（不劈开 emoji 的代理对），完整正文由 CLI 的合成 assistant 消息承载。
+          // 判据看 is_error：重试耗尽的 result 也可能报 subtype "success"
+          const firstLine = (ev.resultText ?? "").split("\n")[0]?.replace(/\s+/g, " ").trim() ?? "";
+          const chars = [...firstLine];
+          const detail = chars.length > 60 ? `${chars.slice(0, 60).join("")}…` : firstLine;
+          onToast(detail ? `本轮执行出错：${detail}` : "本轮执行出错");
+        }
         interruptedRef.current = false; // 用完即清（send 里也会清，防止它跨轮残留）
         // 命令/子代理的显示态随本轮一起收掉（command_state 没有终态帧，只能收在这儿）
         setRunningCmd(null);
@@ -1385,7 +1418,7 @@ export default function ChatView({
       // 后端的 thinking 只在 message_start（模型出第一个 token）时才发，而
       // 「CLI 读入 + 等模型首包」这段状态还是 idle，于是停止按钮不出现 ——
       // 用户报的「消息发出去不能立刻打断」就是这段窗口。
-      setStatus({ phase: "thinking" });
+      setStatus({ phase: "thinking" }); // 整对象替换：上一轮的重试态自动丢弃
       markedBusy = true;
       const delivered = await api.chatSend(key, text, images);
       if (!delivered) {
@@ -1481,6 +1514,8 @@ export default function ChatView({
     const key = sessionKeyRef.current;
     if (!key) return;
     interruptedRef.current = true; // 本次轮次结束时的 isError 不算故障
+    // 用户主动中断：丢掉重试态但保持 thinking（中断请求还在飞，状态由后续 status/result 收）
+    setStatus((s) => (s.phase === "thinking" && s.retry ? { phase: "thinking" } : s));
     // 模型还没开口 → 这条消息按「没发出去」处理：连图一起退回输入框。打错字要改是
     // 主要场景，此刻撤回比「中断了但话没了」有用得多（已开口的那轮只中断，判据见 replyStartedRef）。
     // 排在发 IPC 之前：手感要即时；万一中断本身失败，toast 会说明，多出来的文字清除即可
@@ -2244,7 +2279,22 @@ export default function ChatView({
   const planAltMode = planResumeMode === "manual" ? "acceptEdits" : "manual";
   const modeLabel = (m: string) => MODE_OPTIONS.find((o) => o.value === m)?.label ?? m;
 
+  /** 重试倒计时：api_retry 帧的退避是帧到达那一刻的快照，长退避（几十秒）只在下一帧
+   *  到来时才更新——每秒强制重渲染，让胶囊上的剩余秒数真的在走（与思考活秒表同款）。 */
+  const activeRetry = status.phase === "thinking" ? status.retry : undefined;
+  const [retryTick, setRetryTick] = useState(0);
+  useEffect(() => {
+    if (!activeRetry || apiRetryDelayMs(activeRetry) <= 0) return;
+    const id = setInterval(() => setRetryTick((t) => t + 1), 1000);
+    return () => clearInterval(id);
+  }, [activeRetry]);
+
   const statusLabel = useMemo(() => {
+    // 重试优先于其它思考文案：退避等待期没有别的帧，这行是唯一「还在重连」的信号
+    if (activeRetry) {
+      const remaining = activeRetry.receivedAt + apiRetryDelayMs(activeRetry) - Date.now();
+      return apiRetryStatusText(activeRetry, remaining);
+    }
     switch (status.phase) {
       case "starting":
         return "启动中…";
@@ -2276,7 +2326,7 @@ export default function ChatView({
         // 未开始时不显示徽标（搜索按钮旁留白即可）
         return realSessionId ? "已连接" : "";
     }
-  }, [status, realSessionId, runningCmd, subagent, thinkingTokens]);
+  }, [status, realSessionId, runningCmd, subagent, thinkingTokens, activeRetry, retryTick]);
 
   /** `/` 补全的激活条件：输入恰是「/ 开头、还没空格的单个词」——命令带参数后就
    *  不再拦 Enter/Tab（那时 Enter 该发送）。cmdDismissed 是 Esc 收起标记（打进
@@ -2551,7 +2601,12 @@ export default function ChatView({
             </span>
           )}
           {statusLabel && (
-            <span className={`chat-status chat-status-${status.phase}`}>{statusLabel}</span>
+            <span
+              className={`chat-status chat-status-${activeRetry ? "retry" : status.phase}`}
+              title={activeRetry ? apiRetryTooltip(activeRetry) : undefined}
+            >
+              {statusLabel}
+            </span>
           )}
           {session && (
             <>

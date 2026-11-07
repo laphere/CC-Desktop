@@ -186,6 +186,107 @@ describe("轮内用量（turn_usage / thinking_tokens）", () => {
   });
 });
 
+describe("模型请求失败重试（system/api_retry）", () => {
+  // 帧形状取自 2026-11-07 探针（CLI 2.1.319，连不上时连发 attempt 1..10）：
+  // {"type":"system","subtype":"api_retry","attempt":1,"max_retries":10,
+  //  "retry_delay_ms":551,"error_status":null,"error":"unknown",...}
+  it("连接错误（error_status:null）→ api_retry 事件", () => {
+    const t = new SdkMessageTranslator();
+    const out = t.translate(
+      msg({
+        type: "system",
+        subtype: "api_retry",
+        attempt: 2,
+        max_retries: 10,
+        retry_delay_ms: 1160,
+        error_status: null,
+        error: "unknown",
+      }),
+    );
+    expect(out).toEqual([
+      {
+        type: "api_retry",
+        attempt: 2,
+        maxRetries: 10,
+        retryDelayMs: 1160,
+        error: "unknown",
+        status: null,
+        noResponse: null,
+      },
+    ]);
+  });
+
+  it("HTTP 429 / 529 带状态码与错误类别", () => {
+    const t = new SdkMessageTranslator();
+    expect(
+      t.translate(
+        msg({
+          type: "system",
+          subtype: "api_retry",
+          attempt: 1,
+          max_retries: 10,
+          retry_delay_ms: 500,
+          error_status: 429,
+          error: "rate_limit",
+        }),
+      ),
+    ).toEqual([
+      {
+        type: "api_retry",
+        attempt: 1,
+        maxRetries: 10,
+        retryDelayMs: 500,
+        error: "rate_limit",
+        status: 429,
+        noResponse: null,
+      },
+    ]);
+  });
+
+  it("首字节超时带 no_response（已等待 / 下次等待）", () => {
+    const t = new SdkMessageTranslator();
+    expect(
+      t.translate(
+        msg({
+          type: "system",
+          subtype: "api_retry",
+          attempt: 1,
+          max_retries: 1,
+          retry_delay_ms: 20000,
+          error_status: null,
+          error: "unknown",
+          no_response: { waited_ms: 45000, retry_wait_ms: 700 },
+        }),
+      ),
+    ).toEqual([
+      {
+        type: "api_retry",
+        attempt: 1,
+        maxRetries: 1,
+        retryDelayMs: 20000,
+        error: "unknown",
+        status: null,
+        noResponse: { waitedMs: 45000, retryWaitMs: 700 },
+      },
+    ]);
+  });
+
+  it("字段缺失不崩、也不编默认重试上限（0 / null）", () => {
+    const t = new SdkMessageTranslator();
+    expect(t.translate(msg({ type: "system", subtype: "api_retry" }))).toEqual([
+      {
+        type: "api_retry",
+        attempt: 0,
+        maxRetries: 0,
+        retryDelayMs: 0,
+        error: "unknown",
+        status: null,
+        noResponse: null,
+      },
+    ]);
+  });
+});
+
 describe("tool_use", () => {
   it("tool_use_start + 累计 input_json + complete", () => {
     const t = new SdkMessageTranslator();
@@ -291,10 +392,28 @@ describe("result 收尾", () => {
     ]);
   });
 
-  it("error_during_execution → isError true", () => {
+  it("error_during_execution → isError true，原因从 errors[] 取（没有 result 字段）", () => {
     const t = new SdkMessageTranslator();
     const out = t.translate(msg({ type: "result", subtype: "error_during_execution", result: "", errors: ["boom"] }));
-    expect(out[0]).toMatchObject({ type: "turn_end", isError: true });
+    expect(out[0]).toMatchObject({ type: "turn_end", isError: true, resultText: "boom" });
+  });
+
+  it("error_max_turns 也带出 errors[0]；result 有内容时优先用 result", () => {
+    const t = new SdkMessageTranslator();
+    expect(
+      t.translate(
+        msg({
+          type: "result",
+          subtype: "error_max_turns",
+          errors: ["Reached maximum number of turns"],
+        }),
+      )[0],
+    ).toMatchObject({ type: "turn_end", isError: true, resultText: "Reached maximum number of turns" });
+    expect(
+      t.translate(
+        msg({ type: "result", subtype: "success", result: "API Error: refused", is_error: true, errors: ["other"] }),
+      )[0],
+    ).toMatchObject({ type: "turn_end", isError: true, resultText: "API Error: refused" });
   });
 });
 

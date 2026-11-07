@@ -177,6 +177,25 @@ export type ChatEvent =
    *  只喂状态胶囊「思考中 · ~N tok」的活数字，不进任何累计——供应商从不确认这份
    *  估算，进了总数轮末会「先涨后缩」 */
   | { type: "thinking_tokens"; estimated: number }
+  /** 模型请求失败、CLI 自动重试（`system` + subtype:"api_retry"）。CLI 每失败一次发一帧：
+   *  attempt/max_retries 是本次重试的序号与上限，retry_delay_ms 是要等的退避。
+   *  error_status 为 null 表示连接层错误（超时/拒绝连接，没有 HTTP 响应），此时 error
+   *  通常是 "unknown"——别把 null 当「未知状态」，它恰恰是最常见的「连不上」。
+   *  no_response 只在「首字节窗口内没等到响应头」时出现，此时 retry_wait_ms 才是下一次
+   *  等待的时长（retry_delay_ms 不适用于这条路径）。重试等待期没有其它帧，前端就靠
+   *  这帧显示重连状态与倒计时。 */
+  | {
+      type: "api_retry";
+      attempt: number;
+      maxRetries: number;
+      retryDelayMs: number;
+      /** SDKAssistantMessageError（"unknown" / "rate_limit" / "overloaded" / "server_error" …） */
+      error: string;
+      /** HTTP 状态码；连接错误（无响应）为 null */
+      status: number | null;
+      /** 首字节超时的附加读数：已等待多久、下次要等多久（均毫秒） */
+      noResponse: { waitedMs: number; retryWaitMs: number } | null;
+    }
   | { type: "permission_request"; requestId: string; toolName: string; input: unknown }
   | { type: "permission_cancelled"; requestId: string }
   /** ExitPlanMode 方案审批：plan 为方案正文；应答 = allow（退出计划模式继续执行）/ deny（留在计划模式） */
@@ -533,6 +552,28 @@ export class SdkMessageTranslator {
       const n = Number(m.estimated_tokens ?? 0);
       return Number.isFinite(n) && n > 0 ? [{ type: "thinking_tokens", estimated: n }] : [];
     }
+    // 模型请求失败、CLI 自动重试（连接断开 / 限流 / 5xx）：序号、上限、退避与错误类别
+    // 都在这帧上——重试等待期没有其它帧，交给前端显示重连状态。字段缺失按「拿不到就
+    // 不给」处理（0 / null），不编默认的重试上限。
+    if (m.subtype === "api_retry") {
+      const nr = m.no_response as Rec | undefined;
+      return [
+        {
+          type: "api_retry",
+          attempt: Number(m.attempt ?? 0),
+          maxRetries: Number(m.max_retries ?? 0),
+          retryDelayMs: Number(m.retry_delay_ms ?? 0),
+          error: String(m.error ?? "unknown"),
+          status: typeof m.error_status === "number" ? m.error_status : null,
+          noResponse: nr
+            ? {
+                waitedMs: Number(nr.waited_ms ?? 0),
+                retryWaitMs: Number(nr.retry_wait_ms ?? 0),
+              }
+            : null,
+        },
+      ];
+    }
     // status 帧：CLI 把「模式变了」压在它上面（permissionMode 字段）。进计划模式、
     // 批准 ExitPlanMode 退出计划模式时，这帧与工具结果同刻到达——底部模式选择器
     // 就靠它跟手。status:'requesting' 那类帧不带该字段，故有才认。
@@ -768,11 +809,17 @@ function translateResult(m: Rec): ChatEvent[] {
     subtype === "error_max_turns" ||
     subtype === "error_during_execution" ||
     Boolean(m.is_error);
+  // 错误原因有两个来源：SDKResultSuccess 的 `result`（API 错误时装错误文本），
+  // 与 SDKResultError 的 `errors[]`（没有 result 字段）。只取前者会让 max_turns /
+  // during_execution 这两类最需要解释的失败在界面上只剩一句「执行出错」。
+  const errors = Array.isArray(m.errors) ? m.errors.map(String).filter((e) => e.trim() !== "") : [];
+  const result = m.result != null ? String(m.result) : "";
+  const resultText = result.trim() !== "" ? result : (errors[0] ?? null);
   return [
     {
       type: "turn_end",
       isError,
-      resultText: m.result != null ? String(m.result) : null,
+      resultText,
       usage: parseUsage(m.usage),
     },
     { type: "status", state: "idle" },

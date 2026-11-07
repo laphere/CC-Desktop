@@ -327,6 +327,22 @@ export type ChatEvent =
   | { type: "turn_usage"; usage: ChatUsage }
   /** 思考 token 滚动估算（system:thinking_tokens，CLI 自己估的）：只喂状态胶囊活数字 */
   | { type: "thinking_tokens"; estimated: number }
+  /** 模型请求失败、CLI 自动重试（`system` + subtype:"api_retry"）。error_status 为 null
+   *  表示连接层错误（无 HTTP 响应），此时 error 多半是 "unknown"；上限与退避都取 CLI
+   *  上报值，前端不推导。no_response 只在首字节超时时出现，此时 retryWaitMs 是下一次
+   *  等待的时长（retryDelayMs 不适用于这条路径） */
+  | {
+      type: "api_retry";
+      attempt: number;
+      maxRetries: number;
+      retryDelayMs: number;
+      /** SDKAssistantMessageError（"unknown" / "rate_limit" / "overloaded" / "server_error" …） */
+      error: string;
+      /** HTTP 状态码；连接错误（无响应）为 null */
+      status: number | null;
+      /** 首字节超时的附加读数（毫秒）；非该场景为 null */
+      noResponse: { waitedMs: number; retryWaitMs: number } | null;
+    }
   | { type: "permission_request"; requestId: string; toolName: string; input: unknown }
   | { type: "permission_cancelled"; requestId: string }
   /** ExitPlanMode 方案审批：plan 为方案正文；应答 = allow（退出计划模式继续执行）
