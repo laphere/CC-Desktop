@@ -342,6 +342,40 @@ function createWindow(): void {
   mainWindow.webContents.on("will-navigate", (e) => e.preventDefault());
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
 
+  // 文本编辑右键菜单：Electron 没有默认右键菜单，输入框右键原本毫无反应。
+  // 可编辑元素（textarea/input/contenteditable，composer / 搜索框 / 各对话框输入）
+  // 弹撤销/剪切/复制/粘贴/全选；非编辑区仅在选中了文本时弹「复制」。
+  // 走原生菜单（role 自带平台快捷键与行为），粘贴经 Chromium 的 Paste 编辑命令
+  // 触发 DOM paste 事件——composer 的图片粘贴与 Ctrl+V 走同一条路，右键粘贴同样可用。
+  // 渲染层自有自绘菜单的区域（项目/会话/tab 行、消息区划选复制）都在 renderer 里
+  // preventDefault 了，主进程收不到那些 context-menu 事件，互不干扰。
+  mainWindow.webContents.on("context-menu", (_event, params) => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    const hasSelection = params.selectionText.trim().length > 0;
+    if (!params.isEditable && !hasSelection) return;
+    // 粘贴的可用性按剪贴板内容定：有文本，或有图（composer 支持贴图，
+    // image 走 Paste 命令后由它既有的 onPaste 接住）
+    const formats = clipboard.availableFormats();
+    const canPaste =
+      formats.includes("text/plain") || formats.some((f) => f.startsWith("image/"));
+    const items: Electron.MenuItemConstructorOptions[] = params.isEditable
+      ? [
+          { role: "undo", label: "撤销" },
+          { type: "separator" },
+          { role: "cut", label: "剪切", enabled: hasSelection },
+          { role: "copy", label: "复制", enabled: hasSelection },
+          { role: "paste", label: "粘贴", enabled: canPaste },
+          { type: "separator" },
+          { role: "selectAll", label: "全选" },
+        ]
+      : [{ role: "copy", label: "复制" }];
+    Menu.buildFromTemplate(items).popup({
+      window: mainWindow,
+      x: params.x,
+      y: params.y,
+    });
+  });
+
   mainWindow.once("ready-to-show", () => mainWindow?.show());
   if (app.isPackaged) {
     void mainWindow.loadFile(path.join(__dirname, "..", "dist", "index.html"));
