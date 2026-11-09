@@ -3393,14 +3393,49 @@ html.ctrl-links .md-body a {
   word-break: break-word;
 }
 
-/* 用户气泡右下角的发送时间：小字淡色，不进选区（拖选复制正文时不带时间） */
-.chat-user-time {
+/* 用户气泡右下角的一行：复制按钮 + 发送时间。整行不进选区（拖选复制正文时
+   不带时间和图标），右对齐，按钮在前、时间在后 */
+.chat-user-foot {
   margin-top: 3px;
-  text-align: right;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+  user-select: none;
+}
+
+/* 发送时间：小字淡色 */
+.chat-user-time {
   font-size: 10.5px;
   line-height: 1.4;
   color: var(--muted);
-  user-select: none;
+}
+
+/* 复制按钮：常驻占位、默认透明——悬停气泡 / 键盘聚焦 / 刚复制完才点亮，显隐
+   不挤动布局。纯图标 flex 居中即精确居中（.icon-btn 系同款，无字体墨迹偏差）。
+   反馈同 .md-code-copy：.copied 一颗 class 把图标翻成 √（组件侧条件渲染） */
+.chat-user-copy {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 16px;
+  padding: 0;
+  color: var(--muted);
+  background: none;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out-soft);
+}
+.chat-msg-user:hover .chat-user-copy,
+.chat-user-copy:focus-visible,
+.chat-user-copy.copied {
+  opacity: 1;
+}
+.chat-user-copy:hover {
+  color: var(--text);
 }
 
 /* 用户消息里的图片（历史 image 块 + 实时发送的附件） */

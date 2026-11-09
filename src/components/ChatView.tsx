@@ -40,6 +40,7 @@ import {
   ThinkingBlock,
   ToolResultCard,
   ToolUseRow,
+  UserMsgCopyButton,
   activitySummary,
   fmtTokens,
   formatChatTime,
@@ -2522,7 +2523,12 @@ export default function ChatView({
                 {e.text}
               </div>
             )}
-            {timeLabel && <div className="chat-user-time">{timeLabel}</div>}
+            {(timeLabel || e.text) && (
+              <div className="chat-user-foot">
+                {e.text && <UserMsgCopyButton text={e.text} />}
+                {timeLabel && <span className="chat-user-time">{timeLabel}</span>}
+              </div>
+            )}
           </div>,
         );
       } else if (e.t === "asstText") {

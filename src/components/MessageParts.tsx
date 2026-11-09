@@ -2,7 +2,7 @@
  * 消息渲染共享组件：会话页（ChatView）内历史区与实时区共用的内容块渲染体系——
  * 活动组折叠摘要、Markdown、思考折叠、工具调用/结果、代码变更 diff 卡。
  */
-import { useMemo, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 import { installMarkdownExtensions } from "../lib/highlight";
@@ -12,7 +12,9 @@ import { materializeListMarkers } from "../lib/list-markers";
 import type { ContentBlock } from "../types";
 import {
   BrainIcon,
+  CheckIcon,
   ChevronRightIcon,
+  CopyIcon,
   FileDiffIcon,
   FileTextIcon,
   TriangleAlertIcon,
@@ -53,6 +55,44 @@ export function formatChatTime(iso: string | null | undefined): string {
   if (sameDay) return hm;
   const md = `${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
   return d.getFullYear() === now.getFullYear() ? `${md} ${hm}` : `${d.getFullYear()}-${md} ${hm}`;
+}
+
+/** 用户气泡右下角的复制按钮：把本条发言原文写进剪贴板（App 的「复制路径」/「复制
+ *  代码」同一条 navigator.clipboard 通道），成功后图标短暂翻成 √（同款反馈节奏）。
+ *  显隐不在组件里管——按钮常驻占位，默认透明，悬停气泡 / 键盘聚焦 / 刚复制完才
+ *  点亮，见 styles.css 的 .chat-user-copy 一组。 */
+export function UserMsgCopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  const timerRef = useRef<number | null>(null);
+  // 卸载时清掉在飞定时器：晚到的回调会对已卸载组件 setState
+  useEffect(
+    () => () => {
+      if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+    },
+    [],
+  );
+  const onCopy = () => {
+    navigator.clipboard.writeText(text).then(
+      () => {
+        setCopied(true);
+        // 反馈期间再点：重置计时，而不是让上一轮提前清掉状态
+        if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+        timerRef.current = window.setTimeout(() => setCopied(false), 1600);
+      },
+      (err) => console.warn("复制消息失败：", err),
+    );
+  };
+  return (
+    <button
+      type="button"
+      className={copied ? "chat-user-copy copied" : "chat-user-copy"}
+      title="复制"
+      aria-label="复制"
+      onClick={onCopy}
+    >
+      {copied ? <CheckIcon size={12} /> : <CopyIcon size={12} />}
+    </button>
+  );
 }
 
 /** Markdown 渲染（marked + DOMPurify 消毒 + 列表标记物化 + URL 补链 + 代码块复制按钮，
