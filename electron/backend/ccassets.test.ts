@@ -77,6 +77,44 @@ describe("技能读写删", () => {
     expect(await listAssets("skill", tmp, "user", null)).toHaveLength(0);
   });
 
+  it("符号链接/联接的技能目录也进列表，悬空链接不列", async () => {
+    // 共享技能目录链进 skills/（如把 ~/.agents/skills 的技能链给 ~/.claude/skills）；
+    // junction 在 Windows 无需管理员权限，macOS 上 type 参数被忽略、按普通链接创建
+    const shared = path.join(tmp, "shared-skills", "linked-skill");
+    fs.mkdirSync(shared, { recursive: true });
+    fs.writeFileSync(
+      path.join(shared, "SKILL.md"),
+      "---\nname: linked-skill\ndescription: 链接技能\n---\n正文",
+    );
+    fs.mkdirSync(path.join(tmp, "skills"), { recursive: true });
+    fs.symlinkSync(shared, path.join(tmp, "skills", "linked-skill"), "junction");
+    fs.symlinkSync(path.join(tmp, "shared-skills", "ghost"), path.join(tmp, "skills", "ghost"), "junction");
+
+    const list = await listAssets("skill", tmp, "user", null);
+    expect(list.map((v) => v.name)).toEqual(["linked-skill"]);
+    expect(list[0].description).toBe("链接技能");
+    expect(fs.readFileSync(list[0].path, "utf8")).toContain("正文");
+  });
+
+  it("链接技能：编辑写透共享源；删除只移链接、共享源完好", async () => {
+    const shared = path.join(tmp, "shared-skills", "linked-skill");
+    fs.mkdirSync(shared, { recursive: true });
+    const sharedMd = path.join(shared, "SKILL.md");
+    fs.writeFileSync(sharedMd, "---\nname: linked-skill\n---\n正文");
+    fs.mkdirSync(path.join(tmp, "skills"), { recursive: true });
+    fs.symlinkSync(shared, path.join(tmp, "skills", "linked-skill"), "junction");
+
+    // 编辑写透：改的是链接解析目标的文件
+    writeAsset("skill", tmp, "user", null, "linked-skill", "---\nname: linked-skill\n---\n改后正文");
+    expect(fs.readFileSync(sharedMd, "utf8")).toContain("改后正文");
+
+    // 删除：链接从 skills/ 消失，共享源数据完好（备份形态随平台/卷位不同，只断言可访问）
+    const backup = deleteAsset("skill", tmp, "user", null, "linked-skill", trash);
+    expect(fs.existsSync(path.join(tmp, "skills", "linked-skill"))).toBe(false);
+    expect(fs.existsSync(backup)).toBe(true);
+    expect(fs.readFileSync(sharedMd, "utf8")).toContain("改后正文");
+  });
+
   it("同秒删两个同名条目：两份备份都存在（回收站目录唯一化）", async () => {
     writeAsset("skill", tmp, "user", null, "dup", "---\nname: dup\n---\nA");
     writeAsset("skill", tmp, "project", proj, "dup", "---\nname: dup\n---\nB");

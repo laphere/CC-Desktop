@@ -145,8 +145,12 @@ export async function listAssets(
   if (kind === "skill") {
     const out: AssetView[] = [];
     for (const e of fs.readdirSync(root, { withFileTypes: true })) {
-      if (!e.isDirectory() || e.isSymbolicLink()) continue;
       const dir = path.join(root, e.name);
+      // 技能目录允许是符号链接 / Windows 联接（把共享技能目录链进 ~/.claude/skills
+      // 是常见做法）：Dirent 对它们报 LINK 而非 DIR，isDirectory() 为 false，须按
+      // 解析后的 stat 判定——existsDir 走 statSync 会跟进链接，悬空链接返回 false。
+      // 技能只扫一层不递归，跟进链接没有 listMarkdownRecursive 那样的防环顾虑。
+      if (!existsDir(dir)) continue;
       const sp = skillFilePath(dir);
       if (!existsFile(sp)) continue; // 有目录没 SKILL.md = 半成品，不列
       const fm = (() => {
@@ -250,6 +254,25 @@ export function movePathToTrash(target: string, trashRoot: string, kind: AssetKi
   const unique = `${utcTimestamp()}-${randomUUID().slice(0, 8)}`;
   const backup = path.join(trashRoot, "cc-assets", unique, kind, path.basename(target));
   fs.mkdirSync(path.dirname(backup), { recursive: true });
+  // 链接条目（技能目录允许符号链接 / Windows 联接）：只搬链接本身，绝不解析进
+  // 目标——链接的解析目标（如 ~/.agents/skills 里的共享技能）不属于本 app 的删除
+  // 范围，因此回收站里备份的也是链接而非内容副本（事后删掉共享源，备份会悬空）。
+  // 链接跨卷 rename 必抛 EXDEV，且 cpSync(dereference:false) 回退在 Windows 上要
+  // 创建裸符号链接（无管理员权限必 EPERM）——链接的回退是读链接目标原位重建
+  // （目标按目录处理用联接，免管理员权限），不碰 cpSync。
+  if (fs.lstatSync(target).isSymbolicLink()) {
+    try {
+      fs.renameSync(target, backup);
+    } catch {
+      try {
+        fs.symlinkSync(fs.readlinkSync(target), backup, "junction");
+      } catch (e) {
+        throw new Error(`备份失败：${String(e)}`);
+      }
+      fs.rmSync(target, { recursive: true, force: true });
+    }
+    return backup;
+  }
   try {
     fs.renameSync(target, backup);
   } catch {
