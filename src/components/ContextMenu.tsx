@@ -17,6 +17,8 @@ interface Props {
   onOpenFolder: (l: Project) => void;
   onCopyPath: (l: Project) => void;
   onRemove: (l: Project) => void;
+  /** 「项目扩展与规则」：打开设置中心并锁定该项目 scope（设置与扩展中心入口） */
+  onProjectHub: (l: Project) => void;
 }
 
 export default function ContextMenu({
@@ -30,6 +32,7 @@ export default function ContextMenu({
   onOpenFolder,
   onCopyPath,
   onRemove,
+  onProjectHub,
 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   // onClose 走 ref：宿主传的是内联箭头函数，放进 deps 会让全局监听每次渲染重挂
@@ -52,10 +55,10 @@ export default function ContextMenu({
     };
   }, [open]);
 
-  // 防止菜单超出窗口右/下边缘（预留高度要盖住实际菜单：标题 + 5 项 + 2 条分隔）
+  // 防止菜单超出窗口右/下边缘（预留高度要盖住实际菜单：标题 + 6 项 + 2 条分隔）
   const style: React.CSSProperties = {
     left: Math.min(x, window.innerWidth - 210),
-    top: Math.min(y, window.innerHeight - 260),
+    top: Math.min(y, window.innerHeight - 310),
   };
 
   return (
@@ -88,6 +91,10 @@ export default function ContextMenu({
           </button>
           <button className="context-item" onClick={() => { onCopyPath(project); onClose(); }}>
             复制路径
+          </button>
+          <button className="context-item context-accent" onClick={() => { onProjectHub(project); onClose(); }}>
+            项目扩展与规则
+            <span className="tag tag-warn" style={{ marginLeft: "auto" }}>新</span>
           </button>
           <div className="context-sep" />
           <button className="context-item context-danger" onClick={() => { onRemove(project); onClose(); }}>

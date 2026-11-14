@@ -170,6 +170,107 @@ describe("switchProviderFrom", () => {
     expect(() => switchProviderFrom(tmp, providers, "old", "ghost")).toThrow();
     expect(fs.existsSync(path.join(tmp, "settings.json"))).toBe(false);
   });
+
+  // ---------------- 键跟随（设置中心改动不被切换回滚，见 docs/settings-hub-plan.md D9） ----------------
+
+  it("键跟随：模板不含 permissions/hooks/enabledPlugins 时从切换前 live 带过去", () => {
+    writeLive({
+      env: { ANTHROPIC_BASE_URL: "https://old.example", ANTHROPIC_AUTH_TOKEN: "sk-1" },
+      permissions: { allow: ["Bash(git:*)"], defaultMode: "bypassPermissions" },
+      hooks: { Stop: [{ hooks: [{ type: "command", command: "echo done" }] }] },
+      enabledPlugins: { "a@b": true },
+    });
+    const providers = [provider("old", "https://old.example"), provider("new", "https://new.example")];
+    switchProviderFrom(tmp, providers, "old", "new");
+    const live = JSON.parse(fs.readFileSync(path.join(tmp, "settings.json"), "utf8"));
+    expect(live.env.ANTHROPIC_BASE_URL).toBe("https://new.example");
+    expect(live.permissions.allow).toEqual(["Bash(git:*)"]);
+    expect(live.hooks.Stop).toHaveLength(1);
+    expect(live.enabledPlugins["a@b"]).toBe(true);
+  });
+
+  it("键跟随：模板显式含该键则模板赢", () => {
+    writeLive({ env: { ANTHROPIC_BASE_URL: "https://old.example", ANTHROPIC_AUTH_TOKEN: "sk-1" }, permissions: { allow: ["live-rule"] } });
+    const target = provider("new", "https://new.example");
+    (target.settingsConfig as Record<string, unknown>).permissions = { allow: ["template-rule"] };
+    const providers = [provider("old", "https://old.example"), target];
+    switchProviderFrom(tmp, providers, "old", "new");
+    const live = JSON.parse(fs.readFileSync(path.join(tmp, "settings.json"), "utf8"));
+    expect(live.permissions.allow).toEqual(["template-rule"]);
+  });
+
+  it("键跟随：切给自己不跟随（live 被存储配置整文件覆盖的重置语义）", () => {
+    writeLive({
+      env: { ANTHROPIC_BASE_URL: "https://old.example", ANTHROPIC_AUTH_TOKEN: "sk-1" },
+      permissions: { allow: ["drifted"] },
+    });
+    const providers = [provider("old", "https://old.example")];
+    switchProviderFrom(tmp, providers, "old", "old");
+    const live = JSON.parse(fs.readFileSync(path.join(tmp, "settings.json"), "utf8"));
+    expect(live.permissions).toBeUndefined();
+  });
+
+  it("键跟随：切换不把 carryover 键灌进供应商清单条目（存储模板不被污染）", () => {
+    writeLive({
+      env: { ANTHROPIC_BASE_URL: "https://old.example", ANTHROPIC_AUTH_TOKEN: "sk-1" },
+      permissions: { allow: ["Bash"] },
+    });
+    const target = provider("new", "https://new.example");
+    const providers = [provider("old", "https://old.example"), target];
+    switchProviderFrom(tmp, providers, "old", "new");
+    expect((target.settingsConfig as Record<string, unknown>).permissions).toBeUndefined();
+  });
+
+  it("键跟随回归全链：改 permissions → 切走 → 切回 → permissions 仍在（回填+跟随）", () => {
+    writeLive({ env: { ANTHROPIC_BASE_URL: "https://old.example", ANTHROPIC_AUTH_TOKEN: "sk-1" } });
+    const oldSlot = provider("old", "https://old.example");
+    const newSlot = provider("new", "https://new.example");
+    const providers = [oldSlot, newSlot];
+
+    // 用户在设置中心加了权限规则（此刻 live 有、两个模板都没有）
+    const r1 = switchProviderFrom(tmp, providers, null, "old");
+    expect(r1.currentId).toBe("old");
+    writeLive({
+      env: { ANTHROPIC_BASE_URL: "https://old.example", ANTHROPIC_AUTH_TOKEN: "sk-1" },
+      permissions: { allow: ["Bash(git push:*)"] },
+    });
+
+    // 切走：permissions 跟随到新 live
+    switchProviderFrom(tmp, providers, "old", "new");
+    let live = JSON.parse(fs.readFileSync(path.join(tmp, "settings.json"), "utf8"));
+    expect(live.permissions.allow).toEqual(["Bash(git push:*)"]);
+    // 离任回填把带 permissions 的 live 吸收进 old 槽
+    expect((oldSlot.settingsConfig as Record<string, unknown>).permissions).toBeDefined();
+
+    // 切回：old 模板现在**含** permissions（回填所致）→ 模板赢，值仍在
+    switchProviderFrom(tmp, providers, "new", "old");
+    live = JSON.parse(fs.readFileSync(path.join(tmp, "settings.json"), "utf8"));
+    expect(live.permissions.allow).toEqual(["Bash(git push:*)"]);
+    expect(live.env.ANTHROPIC_BASE_URL).toBe("https://old.example");
+  });
+
+  it("键跟随：回填被指纹守卫跳过时，跟随仍从切换前 live 带键", () => {
+    // live 已被外部工具改写（指纹不符）→ 回填跳过，但键跟随照常
+    writeLive({
+      env: { ANTHROPIC_BASE_URL: "https://other.example", ANTHROPIC_AUTH_TOKEN: "sk-other" },
+      hooks: { Stop: [{ hooks: [{ type: "command", command: "echo hi" }] }] },
+    });
+    const providers = [provider("old", "https://old.example"), provider("new", "https://new.example")];
+    const r = switchProviderFrom(tmp, providers, "old", "new");
+    expect(r.warnings).toEqual(["backfill_skipped:old"]);
+    const live = JSON.parse(fs.readFileSync(path.join(tmp, "settings.json"), "utf8"));
+    expect(live.hooks.Stop).toHaveLength(1);
+    expect(live.env.ANTHROPIC_BASE_URL).toBe("https://new.example");
+  });
+
+  it("键跟随：settings.json 缺失时首切无键可带、不报错", () => {
+    const providers = [provider("old", "https://old.example"), provider("new", "https://new.example")];
+    const r = switchProviderFrom(tmp, providers, "old", "new");
+    expect(r.warnings).toEqual(["backfill_failed:old"]);
+    const live = JSON.parse(fs.readFileSync(path.join(tmp, "settings.json"), "utf8"));
+    expect(live.permissions).toBeUndefined();
+    expect(live.env.ANTHROPIC_BASE_URL).toBe("https://new.example");
+  });
 });
 
 // ---------------- 标记重锚定 ----------------

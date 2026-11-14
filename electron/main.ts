@@ -82,6 +82,33 @@ import {
   validateTrashFile,
 } from "./backend/trash";
 import { getUsageStats } from "./backend/usage-stats";
+import {
+  readPermissionRules,
+  writePermissionRules,
+  readHooks,
+  writeHooks,
+  resolveDefaultMode,
+} from "./backend/ccsettings";
+import type { McpScope } from "./backend/ccmcp";
+import type { AssetKind } from "./backend/ccassets";
+import {
+  listMcpServers,
+  saveMcpServer,
+  deleteMcpServer,
+  approveMcpServer,
+} from "./backend/ccmcp";
+import { listPlugins, togglePlugin } from "./backend/ccplugins";
+import {
+  listAssets,
+  readAssetFile,
+  assetFilePath,
+  writeAsset,
+  deleteAsset,
+  readClaudeMd,
+  writeClaudeMd,
+} from "./backend/ccassets";
+import { diskUsage } from "./backend/ccdisk";
+import { readCcState, writeCcState } from "./backend/ccstate";
 import type { IpcContract } from "./ipc-contract";
 
 const DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL ?? "http://127.0.0.1:1420";
@@ -681,6 +708,122 @@ function registerIpc(): void {
     const c = p.dark ? TITLEBAR_COLORS.dark : TITLEBAR_COLORS.light;
     mainWindow.setTitleBarOverlay({ ...c, height: TITLEBAR_HEIGHT });
   });
+
+  // ---------- 设置中心：Claude Code 配置与扩展（cc 系） ----------
+  // 统一口径：cfgDir = claudeConfigDir()，root = rootDir()（app 数据根，回收站/ccstate）。
+  // projectPath 缺省 = 用户级视角（项目级视图返回 null / 空态）。
+  // ⚠️ 渲染层传来的字段运行时不能信：String(undefined) 会得到字面量 "undefined"，
+  // 混过下游校验后能写进 CLI 拥有的文件——统一先经 ccStr / scopeOf / kindOf 收口。
+  const ccStr = (v: unknown, what: string): string => {
+    if (typeof v !== "string" || v.trim() === "") throw new Error(`${what} 不能为空`);
+    return v;
+  };
+  const ccScopeOf = (v: unknown, extra: McpScope[] = []): "user" | "project" => {
+    const allowed = ["user", "project", ...extra];
+    if (typeof v !== "string" || !allowed.includes(v)) throw new Error(`scope 不合法：${String(v)}`);
+    return v as "user" | "project";
+  };
+  const ccKindOf = (v: unknown): AssetKind => {
+    if (v !== "skill" && v !== "agent" && v !== "command") throw new Error(`资源类型不合法：${String(v)}`);
+    return v;
+  };
+
+  handle("cc_perms_read", (p) => {
+    const projectPath = p.projectPath ? String(p.projectPath) : null;
+    return (async () => ({
+      user: await readPermissionRules("user", claudeConfigDir(), null),
+      project: projectPath ? await readPermissionRules("project", claudeConfigDir(), projectPath) : null,
+      defaultMode: await resolveDefaultMode(claudeConfigDir(), projectPath),
+    }))();
+  });
+  handle("cc_perms_write", (p) =>
+    writePermissionRules(
+      ccScopeOf(p.scope),
+      claudeConfigDir(),
+      p.projectPath ? String(p.projectPath) : null,
+      p.rules,
+    ));
+  handle("cc_hooks_read", (p) => {
+    const projectPath = p.projectPath ? String(p.projectPath) : null;
+    return (async () => ({
+      user: await readHooks("user", claudeConfigDir(), null),
+      project: projectPath ? await readHooks("project", claudeConfigDir(), projectPath) : null,
+      disabled: readCcState(rootDir()).disabledHooks,
+    }))();
+  });
+  handle("cc_hooks_write", (p) => {
+    // 先写 hooks 表（校验可能抛错）再落停用暂存：反过来的话校验失败会出现
+    // 「ccstate 说已停用、settings.json 里还活跃」的不一致
+    const scope = ccScopeOf(p.scope);
+    return (async () => {
+      await writeHooks(scope, claudeConfigDir(), p.projectPath ? String(p.projectPath) : null, p.hooks);
+      writeCcState(rootDir(), Array.isArray(p.disabled) ? p.disabled : []);
+      return p.hooks;
+    })();
+  });
+  handle("cc_plugin_list", () => listPlugins(claudeConfigDir()));
+  handle("cc_plugin_toggle", (p) => togglePlugin(claudeConfigDir(), ccStr(p.id, "插件 id"), p.enabled === true));
+  handle("cc_mcp_list", (p) =>
+    listMcpServers(claudeConfigDir(), p.projectPath ? String(p.projectPath) : null));
+  handle("cc_mcp_save", (p) =>
+    saveMcpServer(
+      ccScopeOf(p.scope, ["local"]) as McpScope,
+      claudeConfigDir(),
+      p.projectPath ? String(p.projectPath) : null,
+      ccStr(p.name, "服务器名"),
+      p.config,
+    ));
+  handle("cc_mcp_delete", (p) =>
+    deleteMcpServer(
+      ccScopeOf(p.scope, ["local"]) as McpScope,
+      claudeConfigDir(),
+      p.projectPath ? String(p.projectPath) : null,
+      ccStr(p.name, "服务器名"),
+    ));
+  handle("cc_mcp_approve", (p) =>
+    approveMcpServer(claudeConfigDir(), ccStr(p.projectPath, "projectPath"), ccStr(p.name, "服务器名"), p.approved === true));
+  handle("cc_assets_list", (p) =>
+    listAssets(ccKindOf(p.kind), claudeConfigDir(), ccScopeOf(p.scope), p.projectPath ? String(p.projectPath) : null));
+  handle("cc_asset_read", (p) => {
+    // 返回 { path, content }：路径供 UI 显示来源；readAssetFile 内含存在性校验
+    const fp = assetFilePath(
+      ccKindOf(p.kind),
+      claudeConfigDir(),
+      ccScopeOf(p.scope),
+      p.projectPath ? String(p.projectPath) : null,
+      ccStr(p.name, "条目名"),
+    );
+    return { path: fp, content: readAssetFile(fp) };
+  });
+  handle("cc_asset_write", (p) =>
+    writeAsset(
+      ccKindOf(p.kind),
+      claudeConfigDir(),
+      ccScopeOf(p.scope),
+      p.projectPath ? String(p.projectPath) : null,
+      ccStr(p.name, "条目名"),
+      typeof p.content === "string" ? p.content : "",
+    ));
+  handle("cc_asset_delete", (p) =>
+    deleteAsset(
+      ccKindOf(p.kind),
+      claudeConfigDir(),
+      ccScopeOf(p.scope),
+      p.projectPath ? String(p.projectPath) : null,
+      ccStr(p.name, "条目名"),
+      // 回收站在数据根 trash/ 下（与 会话回收站 同一 trash 根体系）
+      path.join(rootDir(), "trash"),
+    ));
+  handle("cc_claudemd_read", (p) =>
+    readClaudeMd(claudeConfigDir(), ccScopeOf(p.scope), p.projectPath ? String(p.projectPath) : null));
+  handle("cc_claudemd_write", (p) =>
+    writeClaudeMd(
+      claudeConfigDir(),
+      ccScopeOf(p.scope),
+      p.projectPath ? String(p.projectPath) : null,
+      typeof p.content === "string" ? p.content : "",
+    ));
+  handle("cc_disk_usage", () => diskUsage(claudeConfigDir(), rootDir()));
 }
 
 // ---------------- userData 隔离 ----------------

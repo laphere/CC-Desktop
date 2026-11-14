@@ -8,6 +8,22 @@
 // 通道名与 payload 的**编译期约束在 preload**（`electron/ipc-contract.ts` 的 IpcContract），
 // 这里的 `invoke<T>` 只负责把结果类型标出来。
 import type { IpcChannel } from "../../electron/ipc-contract";
+import type {
+  AssetKind,
+  AssetScope,
+  AssetView,
+  ClaudeMdView,
+  CcHooksRead,
+  CcPermsRead,
+  CcScope,
+  DisabledHookEntry,
+  DiskUsage,
+  HooksMap,
+  McpListView,
+  McpScope,
+  PermissionRules,
+  PluginListView,
+} from "../../electron/ipc-contract";
 import { Channel } from "./channel";
 import type {
   ChatCommandInfo,
@@ -320,4 +336,40 @@ export const api = {
   onCloseRequested: (cb: () => void) => bridge.onCloseRequested(cb),
   /** 订阅窗口获得焦点（替代 Tauri 的 onFocusChanged）；返回取消订阅函数 */
   onFocusChanged: (cb: () => void) => bridge.onWindowFocused(cb),
+  // ---------- 设置中心：Claude Code 配置与扩展（cc 系） ----------
+  /** 权限规则两组 + defaultMode 生效链；projectPath 缺省 = 用户级视角 */
+  ccPermsRead: (projectPath?: string) =>
+    invoke<CcPermsRead>("cc_perms_read", projectPath ? { projectPath } : {}),
+  ccPermsWrite: (scope: CcScope, rules: PermissionRules, projectPath?: string) =>
+    invoke<PermissionRules>("cc_perms_write", { scope, rules, ...(projectPath ? { projectPath } : {}) }),
+  ccHooksRead: (projectPath?: string) =>
+    invoke<CcHooksRead>("cc_hooks_read", projectPath ? { projectPath } : {}),
+  ccHooksWrite: (scope: CcScope, hooks: HooksMap, disabled: DisabledHookEntry[], projectPath?: string) =>
+    invoke<HooksMap>("cc_hooks_write", { scope, hooks, disabled, ...(projectPath ? { projectPath } : {}) }),
+  ccPluginList: () => invoke<PluginListView>("cc_plugin_list"),
+  ccPluginToggle: (id: string, enabled: boolean) =>
+    invoke<void>("cc_plugin_toggle", { id, enabled }),
+  ccMcpList: (projectPath?: string) =>
+    invoke<McpListView>("cc_mcp_list", projectPath ? { projectPath } : {}),
+  ccMcpSave: (scope: McpScope, name: string, config: unknown, projectPath?: string) =>
+    invoke<void>("cc_mcp_save", { scope, name, config, ...(projectPath ? { projectPath } : {}) }),
+  ccMcpDelete: (scope: McpScope, name: string, projectPath?: string) =>
+    invoke<void>("cc_mcp_delete", { scope, name, ...(projectPath ? { projectPath } : {}) }),
+  ccMcpApprove: (projectPath: string, name: string, approved: boolean) =>
+    invoke<void>("cc_mcp_approve", { projectPath, name, approved }),
+  ccAssetsList: (kind: AssetKind, scope: AssetScope, projectPath?: string) =>
+    invoke<AssetView[]>("cc_assets_list", { kind, scope, ...(projectPath ? { projectPath } : {}) }),
+  ccAssetRead: (kind: AssetKind, scope: AssetScope, name: string, projectPath?: string) =>
+    invoke<{ path: string; content: string }>("cc_asset_read", {
+      kind, scope, name, ...(projectPath ? { projectPath } : {}),
+    }),
+  ccAssetWrite: (kind: AssetKind, scope: AssetScope, name: string, content: string, projectPath?: string) =>
+    invoke<string>("cc_asset_write", { kind, scope, name, content, ...(projectPath ? { projectPath } : {}) }),
+  ccAssetDelete: (kind: AssetKind, scope: AssetScope, name: string, projectPath?: string) =>
+    invoke<string>("cc_asset_delete", { kind, scope, name, ...(projectPath ? { projectPath } : {}) }),
+  ccClaudeMdRead: (scope: AssetScope, projectPath?: string) =>
+    invoke<ClaudeMdView>("cc_claudemd_read", { scope, ...(projectPath ? { projectPath } : {}) }),
+  ccClaudeMdWrite: (scope: AssetScope, content: string, projectPath?: string) =>
+    invoke<string>("cc_claudemd_write", { scope, content, ...(projectPath ? { projectPath } : {}) }),
+  ccDiskUsage: () => invoke<DiskUsage>("cc_disk_usage"),
 };

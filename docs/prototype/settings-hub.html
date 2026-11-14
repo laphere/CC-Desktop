@@ -1,0 +1,1225 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CC Desktop · 设置与扩展中心（交互原型）</title>
+<style>
+/* ============ 主题变量（逐值取自 src/styles.css） ============ */
+:root {
+  --bg: #f9f8f5;
+  --panel: #ffffff;
+  --panel-2: #f1efe9;
+  --border: #e5e2da;
+  --text: #292524;
+  --muted: #635e58;
+  --dim: #8f8981;
+  --accent: #c15f3c;
+  --accent-hover: #a84e2e;
+  --accent-soft: rgba(193, 95, 60, 0.12);
+  --danger: #dc2626;
+  --danger-soft: rgba(220, 38, 38, 0.1);
+  --star: #d97706;
+  --star-soft: rgba(217, 119, 6, 0.12);
+  --ok: #16a34a;
+  --ok-soft: rgba(22, 163, 74, 0.12);
+  --code-bg: #ebe7de;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.05), 0 8px 24px rgba(0, 0, 0, 0.08);
+  --radius: 10px;
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+  --font-mono: Consolas, "Courier New", "Microsoft YaHei UI", "Microsoft YaHei", monospace;
+  --dur-fast: 130ms;
+  --dur-med: 220ms;
+  --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
+}
+[data-theme="dark"] {
+  --bg: #1f1e1b;
+  --panel: #292724;
+  --panel-2: #33302b;
+  --border: #3d3a34;
+  --text: #f4f1ea;
+  --muted: #a8a29e;
+  --dim: #6f6a63;
+  --accent: #d97757;
+  --accent-hover: #e08b6d;
+  --accent-soft: rgba(217, 119, 87, 0.16);
+  --danger: #f87171;
+  --danger-soft: rgba(248, 113, 113, 0.13);
+  --star: #f5b544;
+  --star-soft: rgba(245, 181, 68, 0.15);
+  --ok: #4ade80;
+  --ok-soft: rgba(74, 222, 128, 0.14);
+  --code-bg: #37342d;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.45), 0 8px 24px rgba(0, 0, 0, 0.55);
+}
+
+/* ============ 基础 ============ */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+button { font-family: inherit; color: inherit; }
+html, body { height: 100%; }
+body {
+  font-family: var(--font);
+  font-size: 13px;
+  color: var(--text);
+  background: var(--bg);
+  overflow: hidden;
+}
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 5px; border: 2px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar-thumb:hover { background: var(--dim); border: 2px solid transparent; background-clip: content-box; }
+.ic { width: 16px; height: 16px; flex: none; }
+.ic-sm { width: 14px; height: 14px; flex: none; }
+.mono { font-family: var(--font-mono); font-size: 12px; }
+
+/* ============ 应用骨架 ============ */
+.app { display: flex; flex-direction: column; height: 100vh; }
+.header {
+  flex: none;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 14px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+.header-left { display: flex; align-items: center; gap: 8px; }
+.brand { font-size: 13px; font-weight: 600; color: var(--muted); letter-spacing: 0.2px; white-space: nowrap; }
+.header-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; flex: none; }
+.header-tools { display: flex; align-items: center; gap: 8px; }
+
+.icon-btn {
+  width: 30px; height: 30px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 8px; border: 1px solid var(--border);
+  background: var(--panel); color: var(--text);
+  cursor: pointer;
+  transition: background var(--dur-fast), border-color var(--dur-fast), color var(--dur-fast);
+}
+.icon-btn:hover { background: var(--panel-2); }
+.icon-btn-sm { width: 26px; height: 26px; border-radius: 6px; }
+
+.pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 12px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--panel);
+  color: var(--muted); font-size: 12px; cursor: pointer; line-height: 1;
+  transition: border-color var(--dur-fast);
+}
+.pill:hover { border-color: var(--dim); }
+.pill .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
+.pill-provider { max-width: 130px; }
+.pill-provider .txt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.main { flex: 1; display: flex; min-height: 0; }
+.sidebar {
+  width: 300px; flex: none;
+  border-right: 1px solid var(--border);
+  padding: 10px;
+  overflow-y: auto;
+  transition: margin-left var(--dur-med) var(--ease-out-soft);
+}
+.app.side-hidden .sidebar { margin-left: -300px; }
+.side-title { font-size: 11px; color: var(--dim); padding: 4px 8px 8px; letter-spacing: 0.5px; }
+.row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 12px; border-radius: var(--radius);
+  border: 1px solid transparent;
+  cursor: pointer; user-select: none;
+  transition: background var(--dur-fast), border-color var(--dur-fast);
+}
+.row:hover { background: var(--panel); border-color: var(--border); }
+.row .chev { color: var(--dim); transition: transform var(--dur-fast); }
+.row.open .chev { transform: rotate(90deg); }
+.row .name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row .path { font-size: 11px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row .col { min-width: 0; flex: 1; }
+.row .count { font-size: 11px; color: var(--dim); flex: none; }
+.session-list { margin: 2px 0 6px 22px; border-left: 1px solid var(--border); padding-left: 8px; }
+.session-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 8px; border-radius: 7px;
+  border: 1px solid transparent; cursor: default;
+  color: var(--muted); font-size: 12.5px;
+  transition: background var(--dur-fast), border-color var(--dur-fast);
+}
+.session-row:hover { background: var(--panel); border-color: var(--border); }
+.session-row .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-row .mt { font-size: 11px; color: var(--dim); flex: none; }
+.session-row.cur { background: var(--panel); border-color: var(--border); }
+
+.content { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: center; padding: 30px; }
+.intro {
+  max-width: 560px; width: 100%;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
+  box-shadow: var(--shadow); padding: 26px 28px;
+}
+.intro h1 { font-size: 16px; margin-bottom: 6px; }
+.intro p { color: var(--muted); font-size: 12.5px; line-height: 1.7; }
+.intro ol { margin: 14px 0 4px 18px; color: var(--muted); font-size: 12.5px; line-height: 2; }
+.intro kbd {
+  font-family: var(--font-mono); font-size: 11px; color: var(--text);
+  background: var(--code-bg); border-radius: 5px; padding: 1px 6px;
+}
+.intro .acts { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+
+/* ============ 按钮体系 ============ */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  line-height: 1; padding: 9px 14px;
+  border-radius: 8px; border: 1px solid var(--border);
+  background: var(--panel); color: var(--text);
+  font-size: 13px; cursor: pointer;
+  transition: background var(--dur-fast), border-color var(--dur-fast), color var(--dur-fast);
+}
+.btn:hover { background: var(--panel-2); }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+.btn-danger { color: var(--danger); }
+.btn-danger:hover { border-color: var(--danger); background: var(--danger-soft); }
+.btn-sm { height: 26px; padding: 0 10px; font-size: 11.5px; border-radius: 7px; }
+
+/* ============ 弹窗体系 ============ */
+.overlay {
+  position: fixed; inset: 0; z-index: 900;
+  background: rgba(0, 0, 0, 0.45);
+  display: none; align-items: center; justify-content: center;
+}
+.overlay.open { display: flex; animation: ov-in var(--dur-fast) var(--ease-out-soft); }
+@keyframes ov-in { from { opacity: 0; } }
+.modal {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  display: flex; flex-direction: column;
+  max-width: calc(100vw - 60px); max-height: calc(100vh - 80px);
+  animation: md-in var(--dur-med) var(--ease-out-soft);
+}
+@keyframes md-in { from { opacity: 0; transform: translateY(8px) scale(0.985); } }
+.modal-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 16px 12px 18px;
+  border-bottom: 1px solid var(--border);
+  flex: none;
+}
+.modal-head h2 { font-size: 14px; font-weight: 600; }
+.modal-body { padding: 14px 18px 18px; overflow-y: auto; }
+.modal-x { border: none; background: none; color: var(--muted); cursor: pointer; width: 28px; height: 28px; border-radius: 7px; display: inline-flex; align-items: center; justify-content: center; }
+.modal-x:hover { background: var(--panel-2); color: var(--text); }
+
+/* ============ 设置中心：左导航 ============ */
+.hub { width: min(900px, 94vw); height: min(650px, 88vh); flex-direction: row; overflow: hidden; }
+.hub-nav {
+  width: 208px; flex: none;
+  border-right: 1px solid var(--border);
+  overflow-y: auto; padding: 10px 8px;
+  background: var(--bg);
+  border-radius: 14px 0 0 14px;
+}
+.nav-group { font-size: 10.5px; color: var(--dim); letter-spacing: 0.8px; padding: 12px 10px 4px; }
+.nav-item {
+  width: 100%; display: flex; align-items: center; gap: 9px;
+  padding: 8px 10px; border: none; background: none;
+  border-radius: 8px; font-size: 13px; color: var(--text);
+  cursor: pointer; text-align: left;
+  transition: background var(--dur-fast), color var(--dur-fast);
+}
+.nav-item .ic { color: var(--dim); transition: color var(--dur-fast); }
+.nav-item:hover { background: var(--panel-2); }
+.nav-item.on { background: var(--accent-soft); color: var(--accent-hover); font-weight: 500; }
+.nav-item.on .ic { color: var(--accent); }
+
+.hub-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.hub-head {
+  flex: none;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 13px 18px;
+  border-bottom: 1px solid var(--border);
+}
+.hub-head h2 { font-size: 14.5px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.hub-content { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 18px 22px; }
+.hub-page { display: none; }
+.hub-page.on { display: block; animation: pg-in var(--dur-med) var(--ease-out-soft); }
+@keyframes pg-in { from { opacity: 0; transform: translateY(4px); } }
+
+/* scope 分段切换器 */
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--panel); flex: none; }
+.seg button {
+  padding: 5px 12px; font-size: 12px; border: none; background: none;
+  color: var(--muted); cursor: pointer; line-height: 1.4;
+  transition: background var(--dur-fast), color var(--dur-fast);
+}
+.seg button + button { border-left: 1px solid var(--border); }
+.seg button.on { background: var(--accent-soft); color: var(--accent-hover); font-weight: 500; }
+.seg.locked { opacity: 0.75; pointer-events: none; }
+
+/* 从项目行进入时的锁定横幅 */
+.lock-banner {
+  display: none;
+  align-items: center; gap: 8px;
+  margin-bottom: 14px; padding: 8px 12px;
+  border: 1px solid var(--border); border-left: 3px solid var(--accent);
+  border-radius: 8px; background: var(--panel);
+  font-size: 12.5px; color: var(--muted);
+}
+.hub.locked .lock-banner { display: flex; }
+.lock-banner .ic { color: var(--accent); }
+.lock-banner b { color: var(--text); font-weight: 500; }
+.lock-banner button { margin-left: auto; }
+
+/* 通用块 */
+.hint { color: var(--muted); font-size: 12px; line-height: 1.7; }
+.h3 { font-size: 13px; font-weight: 600; margin: 18px 0 8px; display: flex; align-items: center; gap: 8px; }
+.h3:first-child { margin-top: 0; }
+.card {
+  display: flex; align-items: center; gap: 10px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--panel); padding: 10px 12px;
+}
+.card + .card { margin-top: 8px; }
+.card .grow { flex: 1; min-width: 0; }
+.card .title { font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 8px; }
+.card .sub { font-size: 11.5px; color: var(--muted); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card .ops { display: flex; gap: 6px; flex: none; align-items: center; }
+.stack { display: flex; flex-direction: column; gap: 8px; }
+
+.badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 10.5px; line-height: 1; padding: 3px 7px;
+  border-radius: 999px; border: 1px solid var(--border);
+  color: var(--muted); flex: none; font-weight: 400;
+}
+.badge.b-ok { color: var(--ok); background: var(--ok-soft); border-color: transparent; }
+.badge.b-acc { color: var(--accent-hover); background: var(--accent-soft); border-color: transparent; }
+.badge.b-star { color: var(--star); background: var(--star-soft); border-color: transparent; }
+.badge.b-danger { color: var(--danger); background: var(--danger-soft); border-color: transparent; }
+
+.code-chip {
+  font-family: var(--font-mono); font-size: 11.5px;
+  background: var(--code-bg); border-radius: 5px; padding: 1px 6px;
+  word-break: break-all;
+}
+
+/* 开关 */
+.switch {
+  position: relative; width: 34px; height: 20px; flex: none;
+  border-radius: 999px; border: 1px solid var(--border);
+  background: var(--panel-2); cursor: pointer;
+  transition: background var(--dur-fast), border-color var(--dur-fast);
+}
+.switch::after {
+  content: ""; position: absolute; top: 2px; left: 2px;
+  width: 14px; height: 14px; border-radius: 50%;
+  background: var(--panel); box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+  transition: transform var(--dur-fast) var(--ease-out-soft);
+}
+.switch.on { background: var(--accent); border-color: var(--accent); }
+.switch.on::after { transform: translateX(14px); }
+
+/* 单选卡片（应用页） */
+.radio-card {
+  display: flex; flex-direction: column; gap: 4px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--panel); padding: 10px 12px;
+  cursor: pointer; transition: border-color var(--dur-fast), background var(--dur-fast);
+}
+.radio-card.on { border-color: var(--accent); background: var(--accent-soft); }
+.radio-card .rc-t { font-size: 12.5px; font-weight: 500; display: flex; align-items: center; gap: 6px; }
+.radio-card .rc-d { font-size: 11px; color: var(--muted); line-height: 1.5; }
+.radio-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.radio-grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+
+/* 权限规则 chips */
+.rule-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--font-mono); font-size: 12px;
+  border: 1px solid var(--border); background: var(--panel);
+  border-radius: 7px; padding: 5px 8px;
+}
+.rule-chip button { border: none; background: none; color: var(--dim); cursor: pointer; display: inline-flex; padding: 0; }
+.rule-chip button:hover { color: var(--danger); }
+.rule-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.add-rule { display: flex; gap: 8px; margin-top: 10px; }
+.add-rule input {
+  flex: 1; font-family: var(--font-mono); font-size: 12px;
+  border: 1px solid var(--border); border-radius: 8px;
+  background: var(--panel); color: var(--text); padding: 7px 10px;
+  outline: none;
+}
+.add-rule input:focus { border-color: var(--accent); }
+
+/* 空态 */
+.empty {
+  border: 1.5px dashed var(--border); border-radius: var(--radius);
+  padding: 26px 18px; text-align: center; color: var(--dim);
+}
+.empty .ic { width: 22px; height: 22px; margin-bottom: 8px; }
+.empty .t { font-size: 12.5px; color: var(--muted); }
+.empty .d { font-size: 11.5px; margin-top: 4px; line-height: 1.6; }
+
+/* 技能网格 */
+.skill-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.skill-card {
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--panel); padding: 10px 12px; cursor: pointer;
+  transition: border-color var(--dur-fast);
+}
+.skill-card:hover { border-color: var(--accent); }
+.skill-card .t { font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 8px; }
+.skill-card .d { font-size: 11.5px; color: var(--muted); margin-top: 4px; line-height: 1.55;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.skill-detail {
+  grid-column: 1 / -1;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg); padding: 12px 14px;
+}
+.skill-detail pre {
+  font-family: var(--font-mono); font-size: 11.5px; line-height: 1.7;
+  color: var(--muted); white-space: pre-wrap; margin: 8px 0 10px;
+}
+.skill-detail[hidden] { display: none; }
+
+/* CLAUDE.md 编辑器 */
+.editor-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+.editor-box {
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--panel);
+}
+.editor-box textarea {
+  display: block; width: 100%; min-height: 240px; resize: vertical;
+  border: none; background: none; outline: none;
+  font-family: var(--font-mono); font-size: 12px; line-height: 1.75;
+  color: var(--text); padding: 12px 14px; border-radius: var(--radius);
+}
+.import-chip { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--muted); border: 1px solid var(--border); border-radius: 999px; padding: 3px 9px; }
+.import-chip .ic-sm { color: var(--dim); }
+
+/* 磁盘占用 */
+.disk-total { display: flex; align-items: baseline; gap: 8px; margin-bottom: 12px; }
+.disk-total .n { font-size: 22px; font-weight: 600; font-family: var(--font-mono); }
+.disk-total .d { font-size: 12px; color: var(--muted); }
+.disk-row { padding: 9px 2px; }
+.disk-row + .disk-row { border-top: 1px solid var(--border); }
+.disk-row .l1 { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+.disk-row .l1 .sz { margin-left: auto; font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+.disk-row .bar { height: 8px; border-radius: 4px; background: var(--panel-2); margin-top: 7px; overflow: hidden; }
+.disk-row .fill { height: 100%; border-radius: 4px; background: var(--accent); opacity: 0.85; }
+.disk-row .l2 { display: flex; align-items: center; gap: 8px; margin-top: 7px; }
+.disk-row .l2 .d { font-size: 11.5px; color: var(--dim); flex: 1; }
+
+/* warn 横幅 */
+.warn {
+  display: flex; gap: 9px; align-items: flex-start;
+  border: 1px solid var(--border); border-left: 3px solid var(--star);
+  background: var(--star-soft); border-radius: 8px;
+  padding: 9px 12px; font-size: 12px; color: var(--muted); line-height: 1.6;
+  margin-bottom: 14px;
+}
+.warn .ic { color: var(--star); margin-top: 1px; }
+
+/* ============ 健康检查弹窗 ============ */
+.health { width: min(520px, 92vw); }
+.hrow { display: flex; align-items: center; gap: 10px; padding: 10px 2px; }
+.hrow + .hrow { border-top: 1px solid var(--border); }
+.hrow .ic { color: var(--ok); }
+.hrow .t { flex: 1; }
+.hrow .s { font-size: 11.5px; color: var(--muted); }
+.linkish { border: none; background: none; color: var(--accent-hover); cursor: pointer; font-size: 12px; padding: 0; }
+.linkish:hover { text-decoration: underline; }
+
+/* ============ 统计弹窗（含提示词历史 tab） ============ */
+.stats { width: min(720px, 94vw); height: min(560px, 86vh); }
+.tabs { display: flex; gap: 4px; align-items: center; }
+.tab {
+  display: inline-flex; align-items: center; gap: 6px;
+  border: none; background: none; cursor: pointer;
+  font-size: 12.5px; color: var(--muted);
+  padding: 7px 12px; border-radius: 8px;
+  transition: background var(--dur-fast), color var(--dur-fast);
+}
+.tab:hover { background: var(--panel-2); }
+.tab.on { background: var(--accent-soft); color: var(--accent-hover); font-weight: 500; }
+.stat-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 14px; }
+.stat-card { border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel); padding: 10px 12px; }
+.stat-card .k { font-size: 11px; color: var(--muted); }
+.stat-card .v { font-size: 17px; font-weight: 600; font-family: var(--font-mono); margin-top: 4px; }
+.trend { display: flex; align-items: flex-end; gap: 6px; height: 110px; padding: 4px 2px 0; }
+.trend .col { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; gap: 2px; height: 100%; }
+.trend .seg-bar { border-radius: 3px 3px 0 0; }
+.trend .x { text-align: center; font-size: 10.5px; color: var(--dim); margin-top: 6px; }
+
+.hist-search { display: flex; gap: 8px; margin-bottom: 10px; }
+.hist-search input {
+  flex: 1; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--panel); color: var(--text);
+  font-size: 12.5px; padding: 8px 11px; outline: none;
+}
+.hist-search input:focus { border-color: var(--accent); }
+.hist-row { display: flex; gap: 10px; align-items: baseline; padding: 8px 4px; cursor: default; }
+.hist-row + .hist-row { border-top: 1px solid var(--border); }
+.hist-row:hover { background: var(--panel-2); border-radius: 7px; }
+.hist-row .dt { font-family: var(--font-mono); font-size: 11px; color: var(--dim); flex: none; width: 84px; }
+.hist-row .pj { font-size: 11px; color: var(--accent-hover); flex: none; width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hist-row .tx { flex: 1; min-width: 0; font-size: 12.5px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hist-row .copy { opacity: 0; border: none; background: none; color: var(--dim); cursor: pointer; display: inline-flex; flex: none; padding: 0; }
+.hist-row:hover .copy { opacity: 1; }
+.hist-row .copy:hover { color: var(--text); }
+
+/* ============ 右键菜单 ============ */
+.ctx {
+  position: fixed; z-index: 1100; min-width: 208px;
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 10px; box-shadow: var(--shadow);
+  padding: 5px; display: none;
+}
+.ctx.open { display: block; animation: md-in var(--dur-fast) var(--ease-out-soft); }
+.ctx-item {
+  display: flex; align-items: center; gap: 9px;
+  width: 100%; border: none; background: none;
+  padding: 7px 10px; border-radius: 7px;
+  font-size: 12.5px; color: var(--text); cursor: pointer; text-align: left;
+}
+.ctx-item:hover { background: var(--panel-2); }
+.ctx-item .ic-sm { color: var(--dim); }
+.ctx-item.new { color: var(--accent-hover); }
+.ctx-item.new .ic-sm { color: var(--accent); }
+.ctx-sep { height: 1px; background: var(--border); margin: 4px 6px; }
+
+/* ============ toast / 原型导览 ============ */
+.toast {
+  position: fixed; left: 50%; bottom: 26px; z-index: 2000;
+  transform: translateX(-50%) translateY(8px);
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 10px; box-shadow: var(--shadow);
+  padding: 9px 15px; font-size: 12.5px; color: var(--text);
+  opacity: 0; pointer-events: none;
+  transition: opacity var(--dur-med), transform var(--dur-med) var(--ease-out-soft);
+  max-width: 70vw;
+}
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+.proto-help {
+  position: fixed; right: 16px; bottom: 16px; z-index: 800;
+  width: 264px; background: var(--panel); border: 1px solid var(--border);
+  border-radius: 12px; box-shadow: var(--shadow);
+  padding: 12px 14px; font-size: 12px; color: var(--muted); line-height: 1.8;
+}
+.proto-help b { color: var(--text); font-weight: 500; }
+.proto-help .x { position: absolute; top: 6px; right: 6px; }
+</style>
+</head>
+<body>
+
+<!-- SVG symbol 表（Lucide 风格线性图标，与 Icons.tsx 同族） -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-panel" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14M12 5v14"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M10 11v6M14 11v6"/></symbol>
+    <symbol id="i-chart" viewBox="0 0 24 24"><path d="M3 3v18h18M18 17V9M13 17V5M8 17v-3"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></symbol>
+    <symbol id="i-puzzle" viewBox="0 0 24 24"><path d="M19.439 7.85c-.049.322.059.648.289.878l1.568 1.568c.47.47.706 1.087.706 1.704s-.235 1.233-.706 1.704l-1.611 1.611a.98.98 0 0 1-.837.276c-.47-.07-.802-.48-.968-.925a2.501 2.501 0 1 0-3.214 3.214c.446.166.855.497.925.968a.979.979 0 0 1-.276.837l-1.61 1.61a2.404 2.404 0 0 1-1.705.707 2.402 2.402 0 0 1-1.704-.706l-1.568-1.568a1.026 1.026 0 0 0-.877-.29c-.493.074-.84.504-1.02.968a2.5 2.5 0 1 1-3.237-3.237c.464-.18.894-.527.967-1.02a1.026 1.026 0 0 0-.289-.877l-1.568-1.568A2.402 2.402 0 0 1 1.998 12c0-.617.236-1.234.706-1.704L4.23 8.77c.24-.24.581-.353.917-.303.515.077.877.528 1.073 1.01a2.5 2.5 0 1 0 3.259-3.259c-.482-.196-.933-.558-1.01-1.073-.05-.336.062-.676.303-.917l1.525-1.525A2.402 2.402 0 0 1 12 1.998c.617 0 1.234.236 1.704.706l1.568 1.568c.23.23.556.338.877.29.493-.074.84-.504 1.02-.968a2.5 2.5 0 1 1 3.237 3.237c-.464.18-.894.527-.967 1.02Z"/></symbol>
+    <symbol id="i-plug" viewBox="0 0 24 24"><path d="M12 22v-5M9 8V2M15 8V2M18 8H6v3a6 6 0 0 0 12 0V8Z"/></symbol>
+    <symbol id="i-wand" viewBox="0 0 24 24"><path d="m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72Zm-7.64 3.36 3 3M5 6v4M19 14v4M10 2v2M7 8H3M21 16h-4M11 3H9"/></symbol>
+    <symbol id="i-bot" viewBox="0 0 24 24"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2M20 14h2M15 13v2M9 13v2"/></symbol>
+    <symbol id="i-term" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="m7 11 2-2-2-2M11 13h4"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8ZM14 2v6h6M16 13H8M16 17H8M10 9H8"/></symbol>
+    <symbol id="i-disk" viewBox="0 0 24 24"><path d="M22 12H2M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11ZM6 16h.01M10 16h.01"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1 1 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></symbol>
+    <symbol id="i-flow" viewBox="0 0 24 24"><rect width="8" height="8" x="3" y="3" rx="2"/><rect width="8" height="8" x="13" y="13" rx="2"/><path d="M11 7h4a2 2 0 0 1 2 2v4"/></symbol>
+    <symbol id="i-out" viewBox="0 0 24 24"><path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+    <symbol id="i-chev" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+    <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8M21 3v5h-5M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16M8 16H3v5"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></symbol>
+    <symbol id="i-warn" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3ZM12 9v4M12 17h.01"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="14" height="14" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></symbol>
+    <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 17v5M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></symbol>
+  </defs>
+</svg>
+
+<div class="app" id="app">
+  <!-- ===== 顶栏（与真实 app 同构） ===== -->
+  <header class="header">
+    <div class="header-left">
+      <button class="icon-btn" id="sideToggle" title="收起项目列表"><svg class="ic"><use href="#i-panel"/></svg></button>
+      <span class="brand">CC Desktop</span>
+    </div>
+    <div class="header-actions">
+      <button class="pill pill-provider" onclick="toast('原型不含供应商弹窗——真实 app 为独立的 ProviderDialog，设置中心里放跳转项')"><svg class="ic-sm"><use href="#i-out"/></svg><span class="txt">OpenCode Go</span></button>
+      <button class="pill" onclick="openHealth()"><span class="dot"></span>claude 可用</button>
+      <div class="header-tools">
+        <button class="icon-btn" title="搜索项目名或路径" onclick="toast('原型：搜索不演示')"><svg class="ic"><use href="#i-search"/></svg></button>
+        <button class="icon-btn" title="添加项目" onclick="toast('原型：添加项目不演示')"><svg class="ic"><use href="#i-plus"/></svg></button>
+        <button class="icon-btn" title="批量扫描" onclick="toast('原型：批量扫描不演示')"><svg class="ic"><use href="#i-folder"/></svg></button>
+        <button class="icon-btn" title="回收站" onclick="toast('原型：回收站不演示')"><svg class="ic"><use href="#i-trash"/></svg></button>
+        <button class="icon-btn" title="统计（token 用量 / 模型分布 / 提示词历史）" onclick="openStats()"><svg class="ic"><use href="#i-chart"/></svg></button>
+        <button class="icon-btn" title="设置" onclick="openHub()"><svg class="ic"><use href="#i-gear"/></svg></button>
+        <button class="icon-btn" id="themeBtn" title="切换深浅色" onclick="toggleTheme()"><svg class="ic"><use href="#i-sun"/></svg></button>
+      </div>
+    </div>
+  </header>
+
+  <div class="main">
+    <!-- ===== 左栏：项目列表（右键项目行试新菜单项） ===== -->
+    <aside class="sidebar">
+      <div class="side-title">项目（右键行试「项目扩展与规则」）</div>
+      <div class="row open" id="projRow" oncontextmenu="openCtx(event)">
+        <svg class="ic-sm chev"><use href="#i-chev"/></svg>
+        <div class="col">
+          <div class="name">claude-fast</div>
+          <div class="path mono">D:\MyWorkspaces\myProject\claude-fast</div>
+        </div>
+        <span class="count">6 会话</span>
+      </div>
+      <div class="session-list">
+        <div class="session-row cur"><span class="t">feat:输入框右键弹编辑菜单</span><span class="mt">20:12</span></div>
+        <div class="session-row"><span class="t">fix:输入框初始高度收为贴齐两行</span><span class="mt">18:04</span></div>
+        <div class="session-row"><span class="t">feat:模型断流自动重试状态提示</span><span class="mt">昨天</span></div>
+        <div class="session-row"><span class="t">fix:上下文占用轮内改读jsonl真值…</span><span class="mt">昨天</span></div>
+      </div>
+      <div class="row" onclick="toast('原型：其余项目行同样可右键')">
+        <svg class="ic-sm chev"><use href="#i-chev"/></svg>
+        <div class="col"><div class="name">gateway-service</div><div class="path mono">D:\MyWorkspaces\work\gateway</div></div>
+        <span class="count">14 会话</span>
+      </div>
+      <div class="row" onclick="toast('原型：其余项目行同样可右键')">
+        <svg class="ic-sm chev"><use href="#i-chev"/></svg>
+        <div class="col"><div class="name">blog</div><div class="path mono">D:\MyWorkspaces\myProject\blog</div></div>
+        <span class="count">3 会话</span>
+      </div>
+    </aside>
+
+    <!-- ===== 内容区：原型指引 ===== -->
+    <section class="content">
+      <div class="intro">
+        <h1>设置与扩展中心 · 交互原型</h1>
+        <p>演示「插件 / MCP / 技能 / 子代理 / 命令 / 权限规则 / Hooks / CLAUDE.md / 磁盘占用」统一收进设置弹窗（左导航多页）的方案。视觉 token 逐值取自真实 <span class="code-chip">styles.css</span>，仅评审用，不属于 app 代码。</p>
+        <ol>
+          <li>点顶栏 <kbd>⚙ 设置</kbd> —— 打开左导航设置中心（核心）</li>
+          <li><b>右键</b>左栏项目行 —— 试菜单第六项「项目扩展与规则」（scope 锁定本项目）</li>
+          <li>点顶栏 <kbd>claude 可用</kbd> 胶囊 —— 健康检查弹窗新增「磁盘占用」段</li>
+          <li>点顶栏 <kbd>统计</kbd> 图标 —— 统计弹窗新增「提示词历史」tab</li>
+        </ol>
+        <div class="acts">
+          <button class="btn btn-primary" onclick="openHub()"><svg class="ic-sm"><use href="#i-gear"/></svg>打开设置中心</button>
+          <button class="btn" onclick="openHub('plugins', true)">以「本项目」身份进入插件页</button>
+          <button class="btn" onclick="openHealth()">健康检查</button>
+          <button class="btn" onclick="openStats()">统计</button>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<!-- ===== 设置中心弹窗 ===== -->
+<div class="overlay" id="ovHub">
+  <div class="modal hub" id="hub">
+    <nav class="hub-nav">
+      <div class="nav-group">应用</div>
+      <button class="nav-item" data-page="app"><svg class="ic"><use href="#i-gear"/></svg>应用设置</button>
+      <button class="nav-item" data-page="providers"><svg class="ic"><use href="#i-out"/></svg>供应商</button>
+      <div class="nav-group">CLAUDE CODE 配置</div>
+      <button class="nav-item" data-page="perms"><svg class="ic"><use href="#i-shield"/></svg>权限规则</button>
+      <button class="nav-item" data-page="hooks"><svg class="ic"><use href="#i-flow"/></svg>Hooks</button>
+      <div class="nav-group">扩展资源</div>
+      <button class="nav-item" data-page="plugins"><svg class="ic"><use href="#i-puzzle"/></svg>插件</button>
+      <button class="nav-item" data-page="mcp"><svg class="ic"><use href="#i-plug"/></svg>MCP 服务器</button>
+      <button class="nav-item" data-page="skills"><svg class="ic"><use href="#i-wand"/></svg>技能</button>
+      <button class="nav-item" data-page="agents"><svg class="ic"><use href="#i-bot"/></svg>子代理</button>
+      <button class="nav-item" data-page="commands"><svg class="ic"><use href="#i-term"/></svg>命令</button>
+      <button class="nav-item" data-page="claudemd"><svg class="ic"><use href="#i-file"/></svg>CLAUDE.md</button>
+      <div class="nav-group">数据</div>
+      <button class="nav-item" data-page="disk"><svg class="ic"><use href="#i-disk"/></svg>磁盘占用</button>
+    </nav>
+
+    <div class="hub-main">
+      <div class="hub-head">
+        <h2 id="hubTitle">应用设置</h2>
+        <!-- 有 scope 的页面在此渲染分段切换器 -->
+        <div id="hubScope"></div>
+      </div>
+      <div class="hub-content">
+        <div class="lock-banner">
+          <svg class="ic"><use href="#i-lock"/></svg>
+          <span>已从项目 <b>claude-fast</b> 的右键菜单进入，scope 锁定为「本项目」</span>
+          <button class="linkish" onclick="unlockScope()">解除锁定</button>
+        </div>
+
+        <!-- ============ 应用设置 ============ -->
+        <section class="hub-page" data-pg="app">
+          <div class="h3">主题</div>
+          <div class="radio-grid-2">
+            <div class="radio-card" data-theme-pick="light" onclick="setTheme('light')"><span class="rc-t"><svg class="ic-sm"><use href="#i-sun"/></svg>浅色</span><span class="rc-d">米白纸面，暖灰辅助</span></div>
+            <div class="radio-card" data-theme-pick="dark" onclick="setTheme('dark')"><span class="rc-t"><svg class="ic-sm"><use href="#i-moon"/></svg>深色</span><span class="rc-d">深炭底，陶土主色</span></div>
+          </div>
+          <div class="h3">关闭窗口时</div>
+          <div class="radio-grid">
+            <div class="radio-card on"><span class="rc-t">每次询问</span><span class="rc-d">弹出选择：退出或最小化到通知栏</span></div>
+            <div class="radio-card"><span class="rc-t">直接退出</span><span class="rc-d">点击关闭立即退出</span></div>
+            <div class="radio-card"><span class="rc-t">最小化</span><span class="rc-d">隐藏到托盘，托盘菜单可退出</span></div>
+          </div>
+          <div class="h3">新会话默认交互</div>
+          <div class="radio-grid-2">
+            <div class="radio-card on"><span class="rc-t">页面对话</span><span class="rc-d">权限确认 / 方案审批 / 提问都有卡片</span></div>
+            <div class="radio-card"><span class="rc-t">内嵌终端</span><span class="rc-d">app 内嵌真 claude 终端（完整 TUI）</span></div>
+          </div>
+          <div class="h3">其他</div>
+          <div class="card"><div class="grow"><div class="title">开机自启动</div><div class="sub">登录时自动在后台运行本应用</div></div><div class="switch" onclick="this.classList.toggle('on')"></div></div>
+        </section>
+
+        <!-- ============ 供应商 ============ -->
+        <section class="hub-page" data-pg="providers">
+          <div class="h3">供应商切换</div>
+          <p class="hint">供应商管理保持独立弹窗（ProviderDialog），这里只放跳转。切换 = 把目标条目整份写入 live <span class="code-chip">settings.json</span>（原子写 + .bak 备份）。</p>
+          <div class="card" style="margin-top:12px">
+            <svg class="ic" style="color:var(--accent)"><use href="#i-out"/></svg>
+            <div class="grow"><div class="title">OpenCode Go <span class="badge b-ok">当前</span></div><div class="sub mono">https://opencode.ai/zen/go · deepseek-v4.1-flash[1M]</div></div>
+            <button class="btn btn-sm" onclick="toast('原型：打开 ProviderDialog')">管理供应商</button>
+          </div>
+        </section>
+
+        <!-- ============ 权限规则 ============ -->
+        <section class="hub-page" data-pg="perms" data-has-scope="1">
+          <div class="h3">默认档位</div>
+          <div class="card"><div class="grow"><div class="title">permissions.defaultMode</div><div class="sub">会话初始权限档位；app 内对话「不改选不传 flag」时按它定</div></div><span class="badge b-star">bypassPermissions</span></div>
+          <div class="h3">允许（allow）<span class="badge">命中即自动批准</span></div>
+          <div class="rule-chips" data-scope-block="user">
+            <!-- 用户级规则（取自真实 settings.json） -->
+          </div>
+          <div class="rule-chips" data-scope-block="proj" hidden>
+            <span class="rule-chip">Bash(npm run dev:*)<button onclick="toast('原型：删除本项目规则')"><svg class="ic-sm"><use href="#i-x"/></svg></button></span>
+            <span class="rule-chip">Edit(src/**)<button onclick="toast('原型：删除本项目规则')"><svg class="ic-sm"><use href="#i-x"/></svg></button></span>
+          </div>
+          <div class="add-rule">
+            <input placeholder='规则如 Bash(git push:*) 或 Edit(src/**)，回车添加' onkeydown="if(event.key==='Enter')toast('原型：写入对应 scope 的 permissions.allow')">
+            <button class="btn" onclick="toast('原型：写入对应 scope 的 permissions.allow')">添加</button>
+          </div>
+          <div class="h3">询问（ask）<span class="badge">命中即弹确认</span></div>
+          <div class="empty"><svg class="ic"><use href="#i-shield"/></svg><div class="t">暂无 ask 规则</div><div class="d">所有工具按默认档位走，未命中的逐个确认</div></div>
+          <div class="h3">拒绝（deny）</div>
+          <div class="empty"><svg class="ic"><use href="#i-shield"/></svg><div class="t">暂无 deny 规则</div></div>
+          <div class="h3">其他</div>
+          <div class="card"><div class="grow"><div class="title">additionalDirectories</div><div class="sub">允许会话访问工作区之外的目录</div></div><button class="btn btn-sm" onclick="toast('原型：添加目录')">添加目录</button></div>
+        </section>
+
+        <!-- ============ Hooks ============ -->
+        <section class="hub-page" data-pg="hooks">
+          <div class="warn"><svg class="ic"><use href="#i-warn"/></svg><span>Hooks 在每次工具调用 / 会话事件时执行任意命令，<b>写坏影响面大</b>。保存前做 JSON 校验与命令预览；改动对新会话生效。</span></div>
+          <div class="h3" style="margin-top:0">已配置 <button class="btn btn-sm btn-primary" style="margin-left:auto" onclick="toast('原型：新增 Hook（选事件 + matcher + command）')"><svg class="ic-sm"><use href="#i-plus"/></svg>新增 Hook</button></div>
+          <div class="stack">
+            <div class="card">
+              <span class="badge b-acc">PreToolUse</span>
+              <div class="grow"><div class="title">matcher: <span class="code-chip">Bash</span></div><div class="sub mono">node ~/hooks/block-rm.js</div></div>
+              <div class="switch on" onclick="this.classList.toggle('on')"></div>
+              <div class="ops"><button class="icon-btn icon-btn-sm" onclick="toast('原型：编辑')"><svg class="ic-sm"><use href="#i-pencil"/></svg></button><button class="icon-btn icon-btn-sm btn-danger" onclick="toast('原型：删除（二次确认）')"><svg class="ic-sm"><use href="#i-trash"/></svg></button></div>
+            </div>
+            <div class="card">
+              <span class="badge">Stop</span>
+              <div class="grow"><div class="title">matcher: —</div><div class="sub mono">powershell -c New-BurntToastNotification 回合结束</div></div>
+              <div class="switch" onclick="this.classList.toggle('on')"></div>
+              <div class="ops"><button class="icon-btn icon-btn-sm" onclick="toast('原型：编辑')"><svg class="ic-sm"><use href="#i-pencil"/></svg></button><button class="icon-btn icon-btn-sm btn-danger" onclick="toast('原型：删除（二次确认）')"><svg class="ic-sm"><use href="#i-trash"/></svg></button></div>
+            </div>
+          </div>
+          <p class="hint" style="margin-top:12px">事件全集：PreToolUse / PostToolUse / UserPromptSubmit / Notification / Stop / SubagentStop / SessionStart / SessionEnd / PreCompact。用户级与项目级分别落在 <span class="code-chip">~/.claude/settings.json</span> 与 <span class="code-chip">.claude/settings.json</span>。</p>
+        </section>
+
+        <!-- ============ 插件 ============ -->
+        <section class="hub-page" data-pg="plugins">
+          <div class="h3" style="display:flex">已安装
+            <span style="margin-left:auto;display:flex;gap:8px">
+              <button class="btn btn-sm" onclick="toast('原型：展开 marketplace 管理（添加 / 更新 / 移除）')"><svg class="ic-sm"><use href="#i-folder"/></svg>管理 Marketplace</button>
+              <button class="btn btn-sm btn-primary" onclick="toast('原型：spawn claude plugin install，流式回显输出')"><svg class="ic-sm"><use href="#i-download"/></svg>安装插件</button>
+            </span>
+          </div>
+          <div class="stack">
+            <div class="card">
+              <div class="grow"><div class="title">code-review <span class="badge">@claude-plugins-official</span></div><div class="sub">1.0.1 · 审查当前分支改动，ReportFindings 交付发现卡</div></div>
+              <div class="switch on" onclick="this.classList.toggle('on');toast('原型：写 settings.json 的 enabledPlugins')"></div>
+              <div class="ops">
+                <button class="icon-btn icon-btn-sm" title="详情" onclick="toast('原型：claude plugin details（组件清单 + token 成本）')"><svg class="ic-sm"><use href="#i-chev"/></svg></button>
+                <button class="icon-btn icon-btn-sm" title="更新" onclick="toast('原型：spawn claude plugin update')"><svg class="ic-sm"><use href="#i-refresh"/></svg></button>
+                <button class="icon-btn icon-btn-sm btn-danger" title="卸载" onclick="toast('原型：二次确认 → claude plugin uninstall')"><svg class="ic-sm"><use href="#i-trash"/></svg></button>
+              </div>
+            </div>
+            <div class="card">
+              <div class="grow"><div class="title">context7 <span class="badge">@claude-plugins-official</span></div><div class="sub">43fd1f9 · 上游库文档拉取</div></div>
+              <div class="switch on" onclick="this.classList.toggle('on');toast('原型：写 settings.json 的 enabledPlugins')"></div>
+              <div class="ops">
+                <button class="icon-btn icon-btn-sm" onclick="toast('原型：详情')"><svg class="ic-sm"><use href="#i-chev"/></svg></button>
+                <button class="icon-btn icon-btn-sm" onclick="toast('原型：更新')"><svg class="ic-sm"><use href="#i-refresh"/></svg></button>
+                <button class="icon-btn icon-btn-sm btn-danger" onclick="toast('原型：卸载')"><svg class="ic-sm"><use href="#i-trash"/></svg></button>
+              </div>
+            </div>
+            <div class="card">
+              <div class="grow"><div class="title">frontend-design <span class="badge">@claude-plugins-official</span></div><div class="sub">1.1.1 · 前端设计技能包</div></div>
+              <div class="switch on" onclick="this.classList.toggle('on');toast('原型：写 settings.json 的 enabledPlugins')"></div>
+              <div class="ops">
+                <button class="icon-btn icon-btn-sm" onclick="toast('原型：详情')"><svg class="ic-sm"><use href="#i-chev"/></svg></button>
+                <button class="icon-btn icon-btn-sm" onclick="toast('原型：更新')"><svg class="ic-sm"><use href="#i-refresh"/></svg></button>
+                <button class="icon-btn icon-btn-sm btn-danger" onclick="toast('原型：卸载')"><svg class="ic-sm"><use href="#i-trash"/></svg></button>
+              </div>
+            </div>
+            <div class="card">
+              <div class="grow"><div class="title">claude-hud <span class="badge">@claude-hud</span></div><div class="sub">0.7.0 · 状态栏（statusLine 指向其 dist/index.js）</div></div>
+              <div class="switch on" onclick="this.classList.toggle('on');toast('原型：写 settings.json 的 enabledPlugins')"></div>
+              <div class="ops">
+                <button class="icon-btn icon-btn-sm" onclick="toast('原型：详情')"><svg class="ic-sm"><use href="#i-chev"/></svg></button>
+                <button class="icon-btn icon-btn-sm" onclick="toast('原型：更新')"><svg class="ic-sm"><use href="#i-refresh"/></svg></button>
+                <button class="icon-btn icon-btn-sm btn-danger" onclick="toast('原型：卸载')"><svg class="ic-sm"><use href="#i-trash"/></svg></button>
+              </div>
+            </div>
+            <div class="card">
+              <div class="grow"><div class="title">document-skills <span class="badge">@anthropic-agent-skills</span><span class="badge b-star">内置</span></div><div class="sub">官方内置 marketplace，按需自动装载——不在 installed_plugins.json 里，列表取两处并集</div></div>
+              <div class="switch on" onclick="this.classList.toggle('on');toast('原型：写 settings.json 的 enabledPlugins')"></div>
+              <div class="ops"></div>
+            </div>
+            <div class="card" style="opacity:.8">
+              <div class="grow"><div class="title">example-skills <span class="badge">@anthropic-agent-skills</span><span class="badge b-star">内置</span></div><div class="sub">已停用——开关置灰即 settings.json 里的 false</div></div>
+              <div class="switch" onclick="this.classList.toggle('on');toast('原型：写 settings.json 的 enabledPlugins')"></div>
+              <div class="ops"></div>
+            </div>
+          </div>
+          <div class="h3">Marketplace</div>
+          <div class="stack">
+            <div class="card"><div class="grow"><div class="title">claude-plugins-official</div><div class="sub mono">github:anthropics/claude-plugins-official · 2026-11-11 更新</div></div><button class="btn btn-sm" onclick="toast('原型：claude plugin marketplace update')"><svg class="ic-sm"><use href="#i-refresh"/></svg>更新</button></div>
+            <div class="card"><div class="grow"><div class="title">claude-community</div><div class="sub mono">github:anthropics/claude-plugins-community</div></div><button class="btn btn-sm" onclick="toast('原型：更新')"><svg class="ic-sm"><use href="#i-refresh"/></svg>更新</button><button class="icon-btn icon-btn-sm btn-danger" onclick="toast('原型：移除（有已装插件时先拦）')"><svg class="ic-sm"><use href="#i-trash"/></svg></button></div>
+            <div class="card"><div class="grow"><div class="title">claude-hud</div><div class="sub mono">github:jarrodwatts/claude-hud</div></div><button class="btn btn-sm" onclick="toast('原型：更新')"><svg class="ic-sm"><use href="#i-refresh"/></svg>更新</button><button class="icon-btn icon-btn-sm btn-danger" onclick="toast('原型：移除')"><svg class="ic-sm"><use href="#i-trash"/></svg></button></div>
+          </div>
+          <p class="hint" style="margin-top:12px">列表读 <span class="code-chip">installed_plugins.json</span> + <span class="code-chip">settings.json → enabledPlugins</span> 并集；启停只改布尔表（文件直写）；安装/更新/卸载走 <span class="code-chip">claude plugin</span> 命令（克隆/下载/缓存由 CLI 全包）。</p>
+        </section>
+
+        <!-- ============ MCP 服务器 ============ -->
+        <section class="hub-page" data-pg="mcp" data-has-scope="1">
+          <div data-scope-block="user">
+            <div class="h3" style="display:flex">用户级（~/.claude.json）
+              <button class="btn btn-sm btn-primary" style="margin-left:auto" onclick="toast('原型：表单新增 → 写 ~/.claude.json 顶层 mcpServers（写前重读最新 + 保留未知键）')"><svg class="ic-sm"><use href="#i-plus"/></svg>添加服务器</button>
+            </div>
+            <div class="stack">
+              <div class="card">
+                <div class="grow"><div class="title">codegraph <span class="badge b-ok">已连接</span><span class="badge">alwaysLoad</span></div>
+                <div class="sub mono">stdio · codegraph serve --mcp</div></div>
+                <div class="switch on" onclick="this.classList.toggle('on')"></div>
+                <div class="ops">
+                  <button class="icon-btn icon-btn-sm" title="测试连接" onclick="toast('原型：claude mcp get codegraph（自带健康检查）')"><svg class="ic-sm"><use href="#i-refresh"/></svg></button>
+                  <button class="icon-btn icon-btn-sm" title="编辑" onclick="toast('原型：JSON 表单编辑')"><svg class="ic-sm"><use href="#i-pencil"/></svg></button>
+                  <button class="icon-btn icon-btn-sm btn-danger" title="删除" onclick="toast('原型：二次确认 → claude mcp remove -s user')"><svg class="ic-sm"><use href="#i-trash"/></svg></button>
+                </div>
+              </div>
+            </div>
+            <p class="hint" style="margin-top:12px">用户级对所有项目生效。~/.claude.json 是 CLI 高频整份回写的状态文件，写操作须「写前重读 + 保留全部未知键」。</p>
+          </div>
+          <div data-scope-block="proj" hidden>
+            <div class="h3" style="display:flex">本项目共享（.mcp.json，随仓库提交）
+              <button class="btn btn-sm btn-primary" style="margin-left:auto" onclick="toast('原型：写 &lt;项目&gt;/.mcp.json')"><svg class="ic-sm"><use href="#i-plus"/></svg>添加服务器</button>
+            </div>
+            <div class="stack">
+              <div class="card">
+                <div class="grow"><div class="title">sentry <span class="badge b-ok">已连接</span><span class="badge b-acc">共享</span></div><div class="sub mono">http · https://mcp.sentry.dev/mcp</div></div>
+                <div class="switch on" onclick="this.classList.toggle('on')"></div>
+                <div class="ops"><button class="icon-btn icon-btn-sm" onclick="toast('原型：测试连接')"><svg class="ic-sm"><use href="#i-refresh"/></svg></button><button class="icon-btn icon-btn-sm" onclick="toast('原型：编辑')"><svg class="ic-sm"><use href="#i-pencil"/></svg></button><button class="icon-btn icon-btn-sm btn-danger" onclick="toast('原型：删除')"><svg class="ic-sm"><use href="#i-trash"/></svg></button></div>
+              </div>
+              <div class="card" style="opacity:.85">
+                <div class="grow"><div class="title">puppeteer <span class="badge b-star">⏸ 待审批</span><span class="badge b-acc">共享</span></div><div class="sub">.mcp.json 里已声明、本项目尚未批准——批准后写 projects.*.enabledMcpjsonServers</div></div>
+                <div class="switch" onclick="toast('原型：批准 → enabledMcpjsonServers 追加')"></div>
+                <div class="ops"><button class="icon-btn icon-btn-sm" onclick="toast('原型：编辑')"><svg class="ic-sm"><use href="#i-pencil"/></svg></button></div>
+              </div>
+            </div>
+            <div class="h3">本项目私有（仅本机本项目可见）</div>
+            <div class="empty"><svg class="ic"><use href="#i-plug"/></svg><div class="t">暂无 local scope 服务器</div><div class="d">私有 scope 落在 ~/.claude.json → projects.&lt;本项目&gt;.mcpServers</div></div>
+          </div>
+        </section>
+
+        <!-- ============ 技能 ============ -->
+        <section class="hub-page" data-pg="skills" data-has-scope="1">
+          <div data-scope-block="user">
+            <div class="h3" style="display:flex">用户技能（~/.claude/skills/）
+              <button class="btn btn-sm btn-primary" style="margin-left:auto" onclick="toast('原型：claude plugin init 脚手架到 skills 目录，自动以 &lt;名&gt;@skills-dir 加载')"><svg class="ic-sm"><use href="#i-plus"/></svg>新建技能</button>
+            </div>
+            <div class="skill-grid" id="skillGrid">
+              <!-- JS 渲染 -->
+            </div>
+            <p class="hint" style="margin-top:12px">技能 = 目录 + SKILL.md。删除进 app 回收站；插件提供的技能（如 code-review 的）在「插件」页管理，此处不重复列出。</p>
+          </div>
+          <div data-scope-block="proj" hidden>
+            <div class="h3" style="display:flex">本项目技能（.claude/skills/）
+              <button class="btn btn-sm btn-primary" style="margin-left:auto" onclick="toast('原型：新建到项目目录')"><svg class="ic-sm"><use href="#i-plus"/></svg>新建技能</button>
+            </div>
+            <div class="stack">
+              <div class="card"><div class="grow"><div class="title">cc-review-checklist <span class="badge b-acc">项目</span></div><div class="sub">本项目的审查清单技能，随仓库提交</div></div><div class="ops"><button class="btn btn-sm" onclick="toast('原型：查看 SKILL.md')">查看</button><button class="icon-btn icon-btn-sm btn-danger" onclick="toast('原型：删除（进回收站）')"><svg class="ic-sm"><use href="#i-trash"/></svg></button></div></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ============ 子代理 ============ -->
+        <section class="hub-page" data-pg="agents" data-has-scope="1">
+          <div data-scope-block="user">
+            <div class="empty" style="margin-top:4px">
+              <svg class="ic"><use href="#i-bot"/></svg>
+              <div class="t">本机还没有用户级子代理（~/.claude/agents/ 未创建）</div>
+              <div class="d">子代理 = 带 frontmatter 的 Markdown（name / description / tools / model）。<br>创建后所有会话可用 Task 调起。</div>
+              <button class="btn btn-sm btn-primary" style="margin-top:10px" onclick="toast('原型：新建子代理（表单 + 模板）')"><svg class="ic-sm"><use href="#i-plus"/></svg>新建子代理</button>
+            </div>
+          </div>
+          <div data-scope-block="proj" hidden>
+            <div class="empty">
+              <svg class="ic"><use href="#i-bot"/></svg>
+              <div class="t">本项目暂无子代理（.claude/agents/）</div>
+              <div class="d">项目级子代理随仓库提交，团队共享。</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ============ 命令 ============ -->
+        <section class="hub-page" data-pg="commands" data-has-scope="1">
+          <div data-scope-block="user">
+            <div class="empty" style="margin-top:4px">
+              <svg class="ic"><use href="#i-term"/></svg>
+              <div class="t">本机还没有自定义命令（~/.claude/commands/ 未创建）</div>
+              <div class="d">命令 = Markdown 提示词模板，支持 $ARGUMENTS 传参与 !`命令` 预执行注入。<br>插件带来的 /命令 不在此处，归「插件」页。</div>
+              <button class="btn btn-sm btn-primary" style="margin-top:10px" onclick="toast('原型：新建命令')"><svg class="ic-sm"><use href="#i-plus"/></svg>新建命令</button>
+            </div>
+          </div>
+          <div data-scope-block="proj" hidden>
+            <div class="stack">
+              <div class="card"><div class="grow"><div class="title">/ship <span class="badge b-acc">项目</span></div><div class="sub">跑测试 → 提规范检查 → 写 commit message（.claude/commands/ship.md）</div></div><div class="ops"><button class="btn btn-sm" onclick="toast('原型：查看')">查看</button><button class="icon-btn icon-btn-sm" onclick="toast('原型：编辑')"><svg class="ic-sm"><use href="#i-pencil"/></svg></button><button class="icon-btn icon-btn-sm btn-danger" onclick="toast('原型：删除')"><svg class="ic-sm"><use href="#i-trash"/></svg></button></div></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ============ CLAUDE.md ============ -->
+        <section class="hub-page" data-pg="claudemd" data-has-scope="1">
+          <div data-scope-block="user">
+            <div class="editor-head">
+              <span class="hint mono">~/.claude/CLAUDE.md · 5.2 KB · 全局生效</span>
+              <button class="btn btn-sm btn-primary" onclick="toast('原型：原子写 + .bak 备份')"><svg class="ic-sm"><use href="#i-check"/></svg>保存</button>
+            </div>
+            <div class="editor-box"><textarea spellcheck="false"># 全局指令
+
+## CodeGraph
+在索引过的仓库里，优先用 codegraph 而不是 grep 探查代码……
+
+## Git 纪律
+任何 git 操作后不允许停留在 detached HEAD……
+
+## 提交信息规范
+commit message 用中文、精练：一句话概括改动即可。</textarea></div>
+          </div>
+          <div data-scope-block="proj" hidden>
+            <div class="editor-head">
+              <span class="hint mono">D:\...\claude-fast\CLAUDE.md · 201 行 · 本项目真源文档</span>
+              <button class="btn btn-sm btn-primary" onclick="toast('原型：保存')"><svg class="ic-sm"><use href="#i-check"/></svg>保存</button>
+            </div>
+            <div class="import-chip" style="margin-bottom:8px"><svg class="ic-sm"><use href="#i-file"/></svg>检测到 @import：docs/chat-behavior-spec.md · docs/agent-sdk-capabilities.md · AGENTS.md</div>
+            <div class="editor-box"><textarea spellcheck="false"># CC Desktop（claude-fast）
+
+一键在项目目录启动 Claude Code 的桌面应用……
+（真实内容 201 行，此处节选示意）</textarea></div>
+          </div>
+        </section>
+
+        <!-- ============ 磁盘占用 ============ -->
+        <section class="hub-page" data-pg="disk">
+          <div class="disk-total"><span class="n">3.15 GB</span><span class="d">~/.claude 数据目录 · 含 2,143 个会话文件</span></div>
+          <div class="disk-row">
+            <div class="l1"><svg class="ic-sm" style="color:var(--dim)"><use href="#i-folder"/></svg>会话数据 projects<span class="sz">1.84 GB</span></div>
+            <div class="bar"><div class="fill" style="width:58%"></div></div>
+            <div class="l2"><span class="d">删除/清理请走回收站（先备份，可恢复）</span><button class="btn btn-sm" onclick="toast('原型：打开回收站弹窗')">查看回收站</button></div>
+          </div>
+          <div class="disk-row">
+            <div class="l1"><svg class="ic-sm" style="color:var(--dim)"><use href="#i-clock"/></svg>检查点快照 file-history<span class="sz">412 MB</span></div>
+            <div class="bar"><div class="fill" style="width:13%"></div></div>
+            <div class="l2"><span class="d">每轮对话一份文件快照，「撤销本轮改动」依赖它</span><button class="btn btn-sm btn-danger" onclick="toast('原型：清理 30 天前快照（二次确认）')">清理旧快照</button></div>
+          </div>
+          <div class="disk-row">
+            <div class="l1"><svg class="ic-sm" style="color:var(--dim)"><use href="#i-puzzle"/></svg>插件缓存 plugins/cache<span class="sz">724 MB</span></div>
+            <div class="bar"><div class="fill" style="width:23%"></div></div>
+            <div class="l2"><span class="d">含各版本安装体；可 spawn claude plugin list --data-size 精确量</span><button class="btn btn-sm" onclick="toast('原型：claude plugin prune（清无主依赖）')">prune</button></div>
+          </div>
+          <div class="disk-row">
+            <div class="l1"><svg class="ic-sm" style="color:var(--dim)"><use href="#i-download"/></svg>marketplace 克隆<span class="sz">96 MB</span></div>
+            <div class="bar"><div class="fill" style="width:3%"></div></div>
+            <div class="l2"><span class="d">4 个 marketplace 仓库的本地克隆</span><button class="btn btn-sm" onclick="toast('原型：claude plugin marketplace update')">全部更新</button></div>
+          </div>
+          <div class="disk-row">
+            <div class="l1"><svg class="ic-sm" style="color:var(--dim)"><use href="#i-copy"/></svg>粘贴缓存 paste-cache<span class="sz">58 MB</span></div>
+            <div class="bar"><div class="fill" style="width:1.8%"></div></div>
+            <div class="l2"><span class="d"></span><button class="btn btn-sm btn-danger" onclick="toast('原型：清空（二次确认）')">清空</button></div>
+          </div>
+          <div class="disk-row">
+            <div class="l1"><svg class="ic-sm" style="color:var(--dim)"><use href="#i-clock"/></svg>提示词历史 history.jsonl<span class="sz">1.6 MB</span></div>
+            <div class="bar"><div class="fill" style="width:0.6%"></div></div>
+            <div class="l2"><span class="d">在「统计 → 提示词历史」里浏览</span></div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 健康检查弹窗（新增磁盘段） ===== -->
+<div class="overlay" id="ovHealth">
+  <div class="modal health">
+    <div class="modal-head"><h2>健康检查</h2><button class="modal-x" onclick="closeOv('ovHealth')"><svg class="ic"><use href="#i-x"/></svg></button></div>
+    <div class="modal-body">
+      <div class="hrow"><svg class="ic"><use href="#i-check"/></svg><div class="t">claude 可用<div class="s mono">2.1.319（npm 最新 2.1.319，已最新）</div></div></div>
+      <div class="hrow"><svg class="ic"><use href="#i-check"/></svg><div class="t">项目目录<div class="s">3 个项目全部存在</div></div></div>
+      <div class="hrow"><svg class="ic"><use href="#i-check"/></svg><div class="t">版本<div class="s">与 npm 最新版一致</div></div></div>
+      <div class="h3" style="margin-top:16px">磁盘占用（新增）<button class="linkish" style="margin-left:auto" onclick="closeOv('ovHealth');openHub('disk')">查看全部 →</button></div>
+      <div class="hrow"><svg class="ic" style="color:var(--accent)"><use href="#i-disk"/></svg><div class="t">~/.claude 共 3.15 GB<div class="s">会话数据 1.84 GB · 插件缓存 724 MB · 检查点快照 412 MB</div></div><button class="btn btn-sm" onclick="closeOv('ovHealth');openHub('disk')">管理</button></div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 统计弹窗（新增提示词历史 tab） ===== -->
+<div class="overlay" id="ovStats">
+  <div class="modal stats">
+    <div class="modal-head">
+      <h2>统计</h2>
+      <div class="tabs">
+        <button class="tab on" data-tab="token" onclick="statTab('token')">Token 统计</button>
+        <button class="tab" data-tab="hist" onclick="statTab('hist')">提示词历史<span class="badge b-star">新</span></button>
+        <button class="modal-x" style="margin-left:6px" onclick="closeOv('ovStats')"><svg class="ic"><use href="#i-x"/></svg></button>
+      </div>
+    </div>
+    <div class="modal-body">
+      <div id="tab-token">
+        <div class="stat-cards">
+          <div class="stat-card"><div class="k">总 token（全部）</div><div class="v">258.84 M</div></div>
+          <div class="stat-card"><div class="k">会话数</div><div class="v">42</div></div>
+          <div class="stat-card"><div class="k">缓存命中率</div><div class="v">98.9%</div></div>
+          <div class="stat-card"><div class="k">活跃项目</div><div class="v">3</div></div>
+        </div>
+        <div class="trend">
+          <div class="col"><div class="seg-bar" style="height:34%;background:var(--accent)"></div><div class="x">11-08</div></div>
+          <div class="col"><div class="seg-bar" style="height:58%;background:var(--accent)"></div><div class="x">11-09</div></div>
+          <div class="col"><div class="seg-bar" style="height:22%;background:var(--accent)"></div><div class="x">11-10</div></div>
+          <div class="col"><div class="seg-bar" style="height:70%;background:var(--accent)"></div><div class="x">11-11</div></div>
+          <div class="col"><div class="seg-bar" style="height:45%;background:var(--accent)"></div><div class="x">11-12</div></div>
+          <div class="col"><div class="seg-bar" style="height:88%;background:var(--accent)"></div><div class="x">11-13</div></div>
+          <div class="col"><div class="seg-bar" style="height:62%;background:var(--accent)"></div><div class="x">今天</div></div>
+        </div>
+        <p class="hint" style="margin-top:12px">Token 统计为现有功能示意，此处从简。</p>
+      </div>
+      <div id="tab-hist" hidden>
+        <div class="hist-search"><input id="histQ" placeholder="搜索历史提示词（history.jsonl 全量）…" oninput="histFilter()"></div>
+        <div id="histList"></div>
+        <p class="hint" style="margin-top:10px">数据源 <span class="code-chip">~/.claude/history.jsonl</span>（本机 1.6 MB）。点击行复制原文；「我上次怎么问的来着」搜出来直接复用。</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 项目右键菜单 ===== -->
+<div class="ctx" id="ctxMenu">
+  <button class="ctx-item" onclick="ctxAct('移到最前')"><svg class="ic-sm"><use href="#i-chev"/></svg>移到最前</button>
+  <button class="ctx-item" onclick="ctxAct('在系统终端中新建会话')"><svg class="ic-sm"><use href="#i-term"/></svg>在系统终端中新建会话</button>
+  <button class="ctx-item" onclick="ctxAct('打开所在文件夹')"><svg class="ic-sm"><use href="#i-folder"/></svg>打开所在文件夹</button>
+  <button class="ctx-item" onclick="ctxAct('复制路径')"><svg class="ic-sm"><use href="#i-copy"/></svg>复制路径</button>
+  <div class="ctx-sep"></div>
+  <button class="ctx-item" onclick="ctxAct('从列表移除')"><svg class="ic-sm"><use href="#i-x"/></svg>从列表移除</button>
+  <button class="ctx-item new" onclick="ctxProjectHub()"><svg class="ic-sm"><use href="#i-puzzle"/></svg>项目扩展与规则<span class="badge b-star" style="margin-left:auto">新</span></button>
+</div>
+
+<div class="toast" id="toastEl"></div>
+
+<div class="proto-help" id="helpChip">
+  <button class="modal-x x" onclick="document.getElementById('helpChip').remove()"><svg class="ic-sm"><use href="#i-x"/></svg></button>
+  <b>原型导览</b><br>
+  · 顶栏 <b>⚙</b> → 设置中心（左导航 11 页）<br>
+  · <b>右键</b>项目行 → 「项目扩展与规则」<br>
+  · 顶栏胶囊 → 健康检查（含磁盘）<br>
+  · 顶栏 <b>图表</b> → 统计（含提示词历史）<br>
+  · 列表开关 / 开关控件 / scope 切换 / Esc 关闭均可交互
+</div>
+
+<script>
+/* ============ 数据 ============ */
+const SKILLS = [
+  { name: 'archify', d: '架构 / 流程 / 时序图生成，可交互 HTML + SVG 导出' },
+  { name: 'brandkit', d: '品牌套件与识别系统图板生成' },
+  { name: 'design-taste-frontend', d: '反 AI 味前端：落地页 / 作品集 / 改版' },
+  { name: 'full-output-enforcement', d: '强制完整代码输出，禁占位符' },
+  { name: 'gpt-taste', d: 'GSAP 滚动动效 + 编辑式排版' },
+  { name: 'high-end-visual-design', d: '高端机构级视觉规范' },
+  { name: 'image-to-code', d: '先出设计稿再逐像素还原成码' },
+  { name: 'minimalist-ui', d: '编辑风极简界面：暖灰单色 + 平铺 bento' },
+];
+const HIST = [
+  { dt: '11-14 20:12', pj: 'claude-fast', tx: '我想把harness工具大多具备的插件、技能、mcp管理功能加入到当前app内，看下怎么实现' },
+  { dt: '11-14 19:40', pj: 'claude-fast', tx: '输入框右键菜单加上剪切复制粘贴，样式对齐现有右键菜单' },
+  { dt: '11-14 15:02', pj: 'gateway', tx: '排查 504：先看上游超时配置，再看连接池水位，给出结论和修复' },
+  { dt: '11-13 21:18', pj: 'claude-fast', tx: '用户气泡加发言复制按钮，悬停显示，位置对齐右侧工具钮' },
+  { dt: '11-12 10:26', pj: 'blog', tx: '首页加 skeleton，注意 CLS，骨架尺寸和真实内容一致' },
+  { dt: '11-11 16:44', pj: 'claude-fast', tx: '用量台账的模型分布出一张图，9 色上限超出并入其他' },
+  { dt: '11-10 09:30', pj: 'gateway', tx: '把重试改成指数退避，上限 3 次，日志里带 attempt 编号' },
+];
+
+/* ============ 用户级权限规则（真实数据示意） ============ */
+const RULES = ['Bash(tree:*)', 'Bash(touch:*)', 'Bash(grep:*)', 'Bash(mvn:*)', 'Bash(find:*)', 'Bash(npm run dev:*)', 'Bash(npm run build:*)', 'Bash(git checkout:*)', 'Bash(git status)', 'Bash(git diff:*)', 'Bash(git log:*)', 'Bash(git show:*)', 'Bash(node -v)'];
+document.querySelectorAll('[data-scope-block="user"].rule-chips').forEach(el => {
+  el.innerHTML = RULES.map(r => `<span class="rule-chip">${r}<button onclick="toast('原型：删除规则（二次确认）')"><svg class="ic-sm"><use href="#i-x"/></svg></button></span>`).join('');
+});
+
+/* ============ 技能网格 ============ */
+const grid = document.getElementById('skillGrid');
+grid.innerHTML = SKILLS.map((s, i) => `
+  <div class="skill-card" onclick="skillDetail(${i})">
+    <div class="t"><svg class="ic-sm" style="color:var(--accent)"><use href="#i-wand"/></svg>${s.name}</div>
+    <div class="d">${s.d}</div>
+  </div>
+  <div class="skill-detail" id="sd-${i}" hidden>
+    <div class="editor-head" style="margin:0">
+      <span class="hint mono">~/.claude/skills/${s.name}/SKILL.md</span>
+      <span style="display:flex;gap:6px">
+        <button class="btn btn-sm" onclick="toast('原型：在系统文件管理器中打开目录')"><svg class="ic-sm"><use href="#i-folder"/></svg>打开目录</button>
+        <button class="btn btn-sm btn-primary" onclick="toast('原型：保存 SKILL.md')"><svg class="ic-sm"><use href="#i-check"/></svg>保存</button>
+        <button class="btn btn-sm btn-danger" onclick="toast('原型：删除技能（进回收站，可恢复）')"><svg class="ic-sm"><use href="#i-trash"/></svg>删除</button>
+      </span>
+    </div>
+    <pre>---
+name: ${s.name}
+description: ${s.d}……
+
+---
+
+（SKILL.md 正文示意）</pre>
+  </div>`).join('') + `
+  <div class="skill-card" style="display:flex;align-items:center;justify-content:center;color:var(--dim);border-style:dashed" onclick="toast('原型：claude plugin init 脚手架')">
+    <div class="t" style="justify-content:center"><svg class="ic-sm"><use href="#i-plus"/></svg>新建技能</div>
+  </div>`;
+function skillDetail(i) {
+  document.querySelectorAll('.skill-detail').forEach(el => el.hidden = true);
+  const el = document.getElementById('sd-' + i);
+  el.hidden = false;
+  el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+/* ============ 提示词历史 ============ */
+function renderHist(list) {
+  document.getElementById('histList').innerHTML = list.length
+    ? list.map(h => `<div class="hist-row" onclick="toast('原型：复制原文到剪贴板')">
+        <span class="dt">${h.dt}</span><span class="pj">${h.pj}</span><span class="tx" title="${h.tx}">${h.tx}</span>
+        <span class="copy"><svg class="ic-sm"><use href="#i-copy"/></svg></span></div>`).join('')
+    : '<div class="empty"><div class="t">无匹配提示词</div></div>';
+}
+renderHist(HIST);
+function histFilter() {
+  const q = document.getElementById('histQ').value.trim().toLowerCase();
+  renderHist(HIST.filter(h => h.tx.toLowerCase().includes(q) || h.pj.includes(q)));
+}
+
+/* ============ 设置中心：页切换 + scope ============ */
+const PAGE_TITLES = { app: '应用设置', providers: '供应商', perms: '权限规则', hooks: 'Hooks', plugins: '插件', mcp: 'MCP 服务器', skills: '技能', agents: '子代理', commands: '命令', claudemd: 'CLAUDE.md', disk: '磁盘占用' };
+let scopeLocked = false;
+let curPage = 'app';
+
+function segHtml(pg) {
+  if (!document.querySelector(`[data-pg="${pg}"]`)?.dataset.hasScope) return '';
+  return `<div class="seg" id="seg-${pg}">
+    <button data-s="user" onclick="setScope('${pg}','user')">用户级</button>
+    <button data-s="proj" onclick="setScope('${pg}','proj')">本项目</button>
+  </div>`;
+}
+function setScope(pg, s) {
+  const page = document.querySelector(`[data-pg="${pg}"]`);
+  page.querySelectorAll('[data-scope-block]').forEach(b => b.hidden = b.dataset.scopeBlock !== s);
+  const seg = document.getElementById('seg-' + pg);
+  if (seg) seg.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.s === s));
+}
+function gotoPage(pg) {
+  curPage = pg;
+  document.querySelectorAll('.nav-item').forEach(b => b.classList.toggle('on', b.dataset.page === pg));
+  document.querySelectorAll('.hub-page').forEach(p => p.classList.toggle('on', p.dataset.pg === pg));
+  document.getElementById('hubTitle').textContent = PAGE_TITLES[pg] || '';
+  document.getElementById('hubScope').innerHTML = segHtml(pg);
+  const page = document.querySelector(`[data-pg="${pg}"]`);
+  const seg = document.getElementById('seg-' + pg);
+  if (seg) {
+    seg.classList.toggle('locked', scopeLocked && page.dataset.hasScope);
+    const cur = scopeLocked ? 'proj' : (seg.querySelector('.on')?.dataset.s || 'user');
+    setScope(pg, cur);
+  }
+  document.querySelector('#ovHub .hub-content').scrollTop = 0;
+}
+document.querySelectorAll('.nav-item').forEach(b => b.addEventListener('click', () => gotoPage(b.dataset.page)));
+
+function openHub(page, lock) {
+  if (lock) { scopeLocked = true; document.getElementById('hub').classList.add('locked'); }
+  else if (page !== undefined) unlockScope();
+  gotoPage(page || curPage);
+  openOv('ovHub');
+}
+function unlockScope() {
+  scopeLocked = false;
+  document.getElementById('hub').classList.remove('locked');
+  const seg = document.getElementById('seg-' + curPage);
+  if (seg) seg.classList.remove('locked');
+}
+
+/* ============ 弹窗 / 菜单 / toast ============ */
+function openOv(id) { document.getElementById(id).classList.add('open'); }
+function closeOv(id) { document.getElementById(id).classList.remove('open'); }
+document.querySelectorAll('.overlay').forEach(ov => ov.addEventListener('click', e => { if (e.target === ov) ov.classList.remove('open'); }));
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    const ctx = document.getElementById('ctxMenu');
+    if (ctx.classList.contains('open')) return closeCtx();
+    document.querySelectorAll('.overlay.open').forEach(ov => ov.classList.remove('open'));
+  }
+});
+let toastTimer;
+function toast(msg) {
+  const el = document.getElementById('toastEl');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2600);
+}
+
+/* ============ 右键菜单 ============ */
+const ctxMenu = document.getElementById('ctxMenu');
+function openCtx(e) {
+  e.preventDefault();
+  ctxMenu.classList.add('open');
+  const r = ctxMenu.getBoundingClientRect();
+  ctxMenu.style.left = Math.min(e.clientX, innerWidth - r.width - 8) + 'px';
+  ctxMenu.style.top = Math.min(e.clientY, innerHeight - r.height - 8) + 'px';
+}
+function closeCtx() { ctxMenu.classList.remove('open'); }
+function ctxAct(a) { closeCtx(); toast('原型：' + a); }
+function ctxProjectHub() { closeCtx(); openHub('plugins', true); }
+document.addEventListener('click', e => { if (!ctxMenu.contains(e.target)) closeCtx(); });
+document.addEventListener('contextmenu', e => { if (!e.target.closest('#projRow')) closeCtx(); });
+
+/* ============ 主题 / 侧栏 / 统计 tab ============ */
+function setTheme(t) {
+  document.documentElement.dataset.theme = t;
+  document.getElementById('themeBtn').innerHTML = `<svg class="ic"><use href="#i-${t === 'dark' ? 'sun' : 'moon'}"/></svg>`;
+  document.querySelectorAll('[data-theme-pick]').forEach(c => c.classList.toggle('on', c.dataset.themePick === t));
+}
+function toggleTheme() { setTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'); }
+setTheme('dark');
+document.getElementById('sideToggle').addEventListener('click', () => document.getElementById('app').classList.toggle('side-hidden'));
+function openHealth() { openOv('ovHealth'); }
+function openStats() { openOv('ovStats'); }
+function statTab(t) {
+  document.querySelectorAll('#ovStats .tab').forEach(b => b.classList.toggle('on', b.dataset.tab === t));
+  document.getElementById('tab-token').hidden = t !== 'token';
+  document.getElementById('tab-hist').hidden = t !== 'hist';
+}
+
+/* 默认打开指引 */
+gotoPage('app');
+</script>
+</body>
+</html>

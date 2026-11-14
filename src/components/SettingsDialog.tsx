@@ -1,15 +1,57 @@
+// 设置中心（Hub）：左导航多页弹窗。
+//
+// 「应用」页 = 原设置弹窗的全部内容（自启动 / 默认交互 / 关闭行为，footer 保存）；
+// 其余页为 Claude Code 配置与扩展管理（权限规则 / Hooks / 插件 / MCP / 技能 /
+// 子代理 / 命令 / CLAUDE.md / 磁盘占用），各页即时落盘、无统一保存钮。
+// 项目级管理从项目行右键菜单进入（project prop 非空 = scope 锁定本项目）。
 import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import Modal from "./Modal";
 import type { CloseAction } from "../types";
 import { api } from "../lib/api";
+import {
+  SettingsIcon,
+  ExternalLinkIcon,
+  ShieldIcon,
+  WorkflowIcon,
+  PuzzleIcon,
+  PlugIcon,
+  WandIcon,
+  BotIcon,
+  TerminalIcon,
+  FileTextIcon,
+  HardDriveIcon,
+  LockIcon,
+} from "./Icons";
+import { ScopeSeg } from "./settings/shared";
+import { PermsPage, HooksPage, ClaudeMdPage, DiskPage } from "./settings/pages-config";
+import { PluginsPage, McpPage, SkillsPage, AgentsPage, CommandsPage } from "./settings/pages-ext";
+
+export type SettingsPageId =
+  | "app"
+  | "providers"
+  | "perms"
+  | "hooks"
+  | "plugins"
+  | "mcp"
+  | "skills"
+  | "agents"
+  | "commands"
+  | "claudemd"
+  | "disk";
 
 interface Props {
   closeAction: CloseAction;
-  /** 新开会话（项目行「+」）的默认交互方式（页面对话 / 内嵌终端；两种 tab 始终共存）。
-   *  不作用于会话行单击——那条固定是只读查看，不起进程 */
   defaultInteraction: "chat" | "terminal";
+  /** 非空 = 从项目行右键菜单进入：定位到指定页并把 scope 锁在该项目 */
+  initial?: { page?: SettingsPageId; projectPath?: string; projectName?: string } | null;
   onClose: () => void;
   onSave: (action: CloseAction, interaction: "chat" | "terminal") => Promise<void>;
+  /** 「供应商」页跳转：打开独立的 ProviderDialog（设置弹窗保持挂在下层） */
+  onOpenProviders: () => void;
+  /** 磁盘页「查看回收站」：关闭设置、打开回收站弹窗 */
+  onOpenTrash: () => void;
+  /** cc 页的失败提示（App 的 showToast；原生 alert 阻塞且不可主题化，不用） */
+  onToast: (msg: string) => void;
 }
 
 const OPTIONS: { value: CloseAction; label: string; desc: string }[] = [
@@ -22,6 +64,57 @@ const INTERACTIONS: { value: "chat" | "terminal"; label: string; desc: string }[
   { value: "chat", label: "页面对话", desc: "图形界面对话（权限确认 / 方案审批 / 提问都有卡片）" },
   { value: "terminal", label: "内嵌终端", desc: "app 内嵌真 claude 终端（完整 TUI 交互，等价系统终端）" },
 ];
+
+const PAGE_TITLES: Record<SettingsPageId, string> = {
+  app: "应用设置",
+  providers: "供应商",
+  perms: "权限规则",
+  hooks: "Hooks",
+  plugins: "插件",
+  mcp: "MCP 服务器",
+  skills: "技能",
+  agents: "子代理",
+  commands: "命令",
+  claudemd: "CLAUDE.md",
+  disk: "磁盘占用",
+};
+
+/** 带 scope 切换器的页面（头部渲染 用户级/本项目 分段） */
+const SCOPED_PAGES = new Set<SettingsPageId>(["perms", "hooks", "mcp", "skills", "agents", "commands", "claudemd"]);
+
+const NAV: { group: string; items: { id: SettingsPageId; label: string; icon: ReactNode }[] }[] = [
+  {
+    group: "应用",
+    items: [
+      { id: "app", label: "应用设置", icon: <SettingsIcon size={14} /> },
+      { id: "providers", label: "供应商", icon: <ExternalLinkIcon size={14} /> },
+    ],
+  },
+  {
+    group: "CLAUDE CODE 配置",
+    items: [
+      { id: "perms", label: "权限规则", icon: <ShieldIcon size={14} /> },
+      { id: "hooks", label: "Hooks", icon: <WorkflowIcon size={14} /> },
+    ],
+  },
+  {
+    group: "扩展资源",
+    items: [
+      { id: "plugins", label: "插件", icon: <PuzzleIcon size={14} /> },
+      { id: "mcp", label: "MCP 服务器", icon: <PlugIcon size={14} /> },
+      { id: "skills", label: "技能", icon: <WandIcon size={14} /> },
+      { id: "agents", label: "子代理", icon: <BotIcon size={14} /> },
+      { id: "commands", label: "命令", icon: <TerminalIcon size={14} /> },
+      { id: "claudemd", label: "CLAUDE.md", icon: <FileTextIcon size={14} /> },
+    ],
+  },
+  {
+    group: "数据",
+    items: [{ id: "disk", label: "磁盘占用", icon: <HardDriveIcon size={14} /> }],
+  },
+];
+
+// ---------------- 「应用」页（原设置弹窗内容，交互不变） ----------------
 
 /** 选项卡片外壳（单选 / 复选共用）：整块可点，选中态铺强调底色 */
 const cardStyle = (active: boolean): CSSProperties => ({
@@ -42,36 +135,25 @@ const cardDescStyle: CSSProperties = {
   paddingLeft: 24,
 };
 
-/** 设置分组：粗体小标题 + 可选说明段 + 内容 */
-function Section({ title, hint, children }: { title: string; hint?: string; children: ReactNode }) {
-  return (
-    <section>
-      <div style={{ fontWeight: 600, marginBottom: hint ? 8 : 12 }}>{title}</div>
-      {hint && (
-        <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 8, paddingLeft: 2 }}>{hint}</div>
-      )}
-      {children}
-    </section>
-  );
-}
-
-export default function SettingsDialog({ closeAction, defaultInteraction, onClose, onSave }: Props) {
+function AppPage({
+  closeAction,
+  defaultInteraction,
+  onPick,
+}: {
+  closeAction: CloseAction;
+  defaultInteraction: "chat" | "terminal";
+  onPick: (action: CloseAction, interaction: "chat" | "terminal") => void;
+}) {
   const [value, setValue] = useState<CloseAction>(closeAction);
   const [interaction, setInteraction] = useState<"chat" | "terminal">(defaultInteraction);
-  const [saving, setSaving] = useState(false);
-  // ---------- 开机自启动 ----------
   const [autoStart, setAutoStart] = useState(false);
   const [autoSupported, setAutoSupported] = useState(false);
   const [autoBusy, setAutoBusy] = useState(false);
 
-  // 打开设置时读取：当前平台是否支持 + 目前是否已开启
   useEffect(() => {
     let disposed = false;
     (async () => {
-      const [supported, enabled] = await Promise.all([
-        api.isAutostartSupported(),
-        api.autostartEnabled(),
-      ]);
+      const [supported, enabled] = await Promise.all([api.isAutostartSupported(), api.autostartEnabled()]);
       if (disposed) return;
       setAutoSupported(supported);
       setAutoStart(enabled);
@@ -94,98 +176,199 @@ export default function SettingsDialog({ closeAction, defaultInteraction, onClos
     }
   };
 
+  // 选择即上报（footer 的保存只负责落盘，state 归本组件管）
+  useEffect(() => {
+    onPick(value, interaction);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value, interaction]);
+
   return (
-    // 横向布局（780 × 约 480）：单列会把三个分组摞成竖条——窗口不高时正文早早超出一屏、
-    // 被迫内滚。上面「开机自启动」占满整行（就一个开关，行内摆开），下面两组单选并排两栏。
-    // ⚠️ 分组这么摆是量过的：换成「自启动+新会话 | 关闭行为」或「新会话 | 自启动+关闭行为」，
-    // 两栏高差都会拉到 150px 上下、某一栏底部空掉一大块。
-    <Modal
-      title="设置"
-      width={780}
-      onClose={onClose}
-      // 走 Modal footer 槽：正文再长（800×500 这类窄窗口）按钮也钉在底部可见可按
-      footer={
-        <>
-          <button className="btn" onClick={onClose}>
-            取消
-          </button>
-          <button
-            className="btn btn-primary"
-            disabled={saving}
-            onClick={async () => {
-              setSaving(true);
-              await onSave(value, interaction);
-              setSaving(false);
-            }}
-          >
-            保存
-          </button>
-        </>
-      }
-    >
+    <>
       {autoSupported && (
-        <Section title="开机自启动">
-          {/* 整行卡片：说明挪到行尾右对齐，不然 780 宽的卡右边空一大块 */}
-          <label
-            style={{ ...cardStyle(autoStart), display: "flex", alignItems: "center", gap: 8 }}
-          >
-            <input
-              type="checkbox"
-              checked={autoStart}
-              disabled={autoBusy}
-              onChange={(e) => toggleAutoStart(e.target.checked)}
-            />
+        <section className="cc-app-section">
+          <div className="cc-h3"><span>开机自启动</span></div>
+          <label style={{ ...cardStyle(autoStart), display: "flex", alignItems: "center", gap: 8 }}>
+            <input type="checkbox" checked={autoStart} disabled={autoBusy} onChange={(e) => toggleAutoStart(e.target.checked)} />
             <span style={{ fontWeight: 500 }}>登录系统后自动启动 CC Desktop</span>
             <span style={{ fontSize: 12, opacity: 0.7, marginLeft: "auto" }}>
               {autoBusy ? "正在设置…" : "开启后，开机登录时自动在后台运行本应用"}
             </span>
           </label>
-        </Section>
+        </section>
       )}
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1fr",
-          gap: 24,
-          alignItems: "start",
-          marginTop: autoSupported ? 22 : 0,
-        }}
-      >
-        <Section
-          title="新开会话的默认方式"
-          hint="决定「项目行 +」用哪种方式新建会话，也决定只读页上「继续对话」用哪种方式接着聊。点击会话行固定打开只读查看（不起进程）；在系统终端里继续那条固定在右键菜单里，不受此设置影响。两种标签页可同时打开，切换此设置不影响已打开的标签页"
-        >
+      <div className="cc-app-grid">
+        <section>
+          <div className="cc-h3"><span>新开会话的默认方式</span></div>
+          <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 8 }}>
+            决定「项目行 +」用哪种方式新建会话，也决定只读页上「继续对话」用哪种方式接着聊。点击会话行固定打开只读查看（不起进程）；在系统终端里继续那条固定在右键菜单里，不受此设置影响。两种标签页可同时打开，切换此设置不影响已打开的标签页
+          </div>
           {INTERACTIONS.map((o) => (
             <label key={o.value} style={cardStyle(interaction === o.value)}>
-              <input
-                type="radio"
-                name="defaultInteraction"
-                checked={interaction === o.value}
-                onChange={() => setInteraction(o.value)}
-                style={{ marginRight: 8 }}
-              />
+              <input type="radio" name="defaultInteraction" checked={interaction === o.value} onChange={() => setInteraction(o.value)} style={{ marginRight: 8 }} />
               <span style={{ fontWeight: 500 }}>{o.label}</span>
               <div style={cardDescStyle}>{o.desc}</div>
             </label>
           ))}
-        </Section>
+        </section>
 
-        <Section title="关闭窗口时的行为">
+        <section>
+          <div className="cc-h3"><span>关闭窗口时的行为</span></div>
           {OPTIONS.map((o) => (
             <label key={String(o.value)} style={cardStyle(value === o.value)}>
-              <input
-                type="radio"
-                name="closeAction"
-                checked={value === o.value}
-                onChange={() => setValue(o.value)}
-                style={{ marginRight: 8 }}
-              />
+              <input type="radio" name="closeAction" checked={value === o.value} onChange={() => setValue(o.value)} style={{ marginRight: 8 }} />
               <span style={{ fontWeight: 500 }}>{o.label}</span>
               <div style={cardDescStyle}>{o.desc}</div>
             </label>
           ))}
-        </Section>
+        </section>
+      </div>
+    </>
+  );
+}
+
+// ---------------- Hub 壳 ----------------
+
+export default function SettingsDialog({
+  closeAction,
+  defaultInteraction,
+  initial,
+  onClose,
+  onSave,
+  onOpenProviders,
+  onOpenTrash,
+  onToast,
+}: Props) {
+  const [page, setPage] = useState<SettingsPageId>(initial?.page ?? "app");
+  const hasProject = !!(initial?.projectPath && initial.projectName);
+  const projectPath = hasProject ? (initial?.projectPath as string) : null;
+  const [scopeLocked, setScopeLocked] = useState(hasProject);
+  const [scope, setScope] = useState<"user" | "project">(hasProject ? "project" : "user");
+  // 「应用」页的暂存选择：footer 保存时交给 App 落盘
+  const [appPick, setAppPick] = useState<{ action: CloseAction; interaction: "chat" | "terminal" }>({
+    action: closeAction,
+    interaction: defaultInteraction,
+  });
+  const [savingApp, setSavingApp] = useState(false);
+
+  const goto = (id: SettingsPageId) => {
+    setPage(id);
+  };
+
+  const content = (() => {
+    switch (page) {
+      case "app":
+        return (
+          <AppPage
+            closeAction={closeAction}
+            defaultInteraction={defaultInteraction}
+            onPick={(action, interaction) => setAppPick({ action, interaction })}
+          />
+        );
+      case "providers":
+        return (
+          <>
+            <div className="cc-h3"><span>供应商切换</span></div>
+            <div className="cc-hint">
+              供应商管理是独立弹窗（清单存 app 配置，切换 = 整份原子替换 live settings.json，
+              设置中心管理的权限 / Hooks / 插件启停在切换时自动跟随——模板没写的键从当前 live 带过去）。
+            </div>
+            <div style={{ marginTop: 12 }}>
+              <button type="button" className="btn btn-primary" onClick={onOpenProviders}>
+                打开供应商管理
+              </button>
+            </div>
+          </>
+        );
+      case "perms":
+        return <PermsPage scope={scope} projectPath={projectPath} onToast={onToast} />;
+      case "hooks":
+        return <HooksPage scope={scope} projectPath={projectPath} onToast={onToast} />;
+      case "plugins":
+        return <PluginsPage onToast={onToast} />;
+      case "mcp":
+        return <McpPage scope={scope} projectPath={projectPath} onToast={onToast} />;
+      case "skills":
+        return <SkillsPage scope={scope} projectPath={projectPath} onToast={onToast} />;
+      case "agents":
+        return <AgentsPage scope={scope} projectPath={projectPath} onToast={onToast} />;
+      case "commands":
+        return <CommandsPage scope={scope} projectPath={projectPath} onToast={onToast} />;
+      case "claudemd":
+        return <ClaudeMdPage scope={scope} projectPath={projectPath} onToast={onToast} />;
+      case "disk":
+        return <DiskPage onOpenTrash={onOpenTrash} />;
+    }
+  })();
+
+  return (
+    <Modal
+      title="设置"
+      width={880}
+      className="cc-hub"
+      onClose={onClose}
+      footer={
+        page === "app" ? (
+          <>
+            <button type="button" className="btn" onClick={onClose}>
+              取消
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={savingApp}
+              onClick={async () => {
+                setSavingApp(true);
+                try {
+                  await onSave(appPick.action, appPick.interaction);
+                } finally {
+                  setSavingApp(false);
+                }
+              }}
+            >
+              保存
+            </button>
+          </>
+        ) : undefined
+      }
+    >
+      <div className="cc-hub-nav">
+        {NAV.map((g) => (
+          <div key={g.group}>
+            <div className="cc-nav-group">{g.group}</div>
+            {g.items.map((it) => (
+              <button
+                key={it.id}
+                type="button"
+                className={`cc-nav-item${page === it.id ? " cc-nav-on" : ""}`}
+                onClick={() => goto(it.id)}
+              >
+                {it.icon}
+                <span>{it.label}</span>
+              </button>
+            ))}
+          </div>
+        ))}
+      </div>
+      <div className="cc-hub-main">
+        <div className="cc-hub-head">
+          <h2>{PAGE_TITLES[page]}</h2>
+          {SCOPED_PAGES.has(page) && (
+            <ScopeSeg value={scope} onChange={setScope} locked={scopeLocked && scope === "project"} hasProject={hasProject} />
+          )}
+        </div>
+        {scopeLocked && scope === "project" && SCOPED_PAGES.has(page) && (
+          <div className="cc-lock-banner">
+            <LockIcon size={13} />
+            <span>
+              已从项目 <b>{initial?.projectName}</b> 的右键菜单进入，scope 锁定为「本项目」
+            </span>
+            <button type="button" className="linkish" onClick={() => setScopeLocked(false)}>
+              解除锁定
+            </button>
+          </div>
+        )}
+        <div className="cc-hub-content">{content}</div>
       </div>
     </Modal>
   );

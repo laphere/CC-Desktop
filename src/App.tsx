@@ -30,7 +30,7 @@ import NewLauncherDialog from "./components/NewLauncherDialog";
 import BatchAddDialog from "./components/BatchAddDialog";
 import HealthDialog from "./components/HealthDialog";
 import ConfirmDialog from "./components/ConfirmDialog";
-import SettingsDialog from "./components/SettingsDialog";
+import SettingsDialog, { type SettingsPageId } from "./components/SettingsDialog";
 import CloseChoiceDialog from "./components/CloseChoiceDialog";
 import RenameDialog from "./components/RenameDialog";
 import TrashDialog from "./components/TrashDialog";
@@ -283,7 +283,13 @@ export default function App() {
   const [toast, setToast] = useState<string | null>(null);
   const [claudeOk, setClaudeOk] = useState<boolean | null>(null);
   const [closeAction, setCloseAction] = useState<CloseAction>(null);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  /** 设置中心打开态：page = 定位页；projectPath/Name 非空 = 从项目行右键菜单进入
+   *  （scope 锁定本项目）。null = 关闭。 */
+  const [settingsOpen, setSettingsOpen] = useState<{
+    page?: SettingsPageId;
+    projectPath?: string;
+    projectName?: string;
+  } | null>(null);
   const [closeChoiceOpen, setCloseChoiceOpen] = useState(false);
   const [trashOpen, setTrashOpen] = useState(false);
   const [statsOpen, setStatsOpen] = useState(false);
@@ -1702,6 +1708,30 @@ export default function App() {
     return t?.kind === "chat" ? t.session?.file ?? null : null;
   }, [tabs, activeTabId]);
 
+  /** 打开供应商弹窗（顶栏胶囊与设置中心「供应商」页共用）。
+   *  打开时重新拉取：live 可能已被外部工具（CC Switch 等）改写，
+   *  后端 provider_list 顺带做标记重锚定，保证「当前」徽标是磁盘实况 */
+  const openProviders = () => {
+    setProviderOpen(true);
+    api.providerList().then(setProviderState).catch((e) => {
+      // 从未加载成功过时弹窗无内容可渲染，收回打开态并提示。
+      // ⚠️ 直接清、不走 animateModalClose：它按**栈顶**定标，此刻供应商弹窗
+      // 因 providerState 为空根本没挂载，若用户已开着别的弹窗（统计/回收站…），
+      // 会被错打淡出到透明还等不到自己的 onClose（2026-09-26 code review）
+      if (!providerState) setProviderOpen(false);
+      showToast("供应商清单加载失败：" + String(e));
+    });
+  };
+
+  /** 健康检查弹窗「磁盘占用」段的跳转：先播健康弹窗出场（按钮在它内部，
+   *  animateModalClose 按栈顶定标正好是它），落定后打开设置中心磁盘页 */
+  const openDiskFromHealth = () => {
+    animateModalClose(() => {
+      setDialog(null);
+      setSettingsOpen({ page: "disk" });
+    });
+  };
+
   return (
     <div className="app">
       <Header
@@ -1721,20 +1751,8 @@ export default function App() {
         onBatch={() => setDialog("batch")}
         onTrash={() => setTrashOpen(true)}
         onStats={() => setStatsOpen(true)}
-        onProviders={() => {
-          setProviderOpen(true);
-          // 打开时重新拉取：live 可能已被外部工具（CC Switch 等）改写，
-          // 后端 provider_list 顺带做标记重锚定，保证「当前」徽标是磁盘实况
-          api.providerList().then(setProviderState).catch((e) => {
-            // 从未加载成功过时弹窗无内容可渲染，收回打开态并提示。
-            // ⚠️ 直接清、不走 animateModalClose：它按**栈顶**定标，此刻供应商弹窗
-            // 因 providerState 为空根本没挂载，若用户已开着别的弹窗（统计/回收站…），
-            // 会被错打淡出到透明还等不到自己的 onClose（2026-09-26 code review）
-            if (!providerState) setProviderOpen(false);
-            showToast("供应商清单加载失败：" + String(e));
-          });
-        }}
-        onSettings={() => setSettingsOpen(true)}
+        onProviders={openProviders}
+        onSettings={() => setSettingsOpen({})}
       />
 
       <main className="main main-split">
@@ -1886,6 +1904,7 @@ export default function App() {
           onOpenFolder={openFolder}
           onCopyPath={copyPath}
           onRemove={confirmRemove}
+          onProjectHub={(l) => setSettingsOpen({ page: "plugins", projectPath: l.path, projectName: l.name })}
         />
       )}
 
@@ -1954,6 +1973,7 @@ export default function App() {
           items={items}
           claudeOk={claudeOk}
           onClose={() => animateModalClose(() => setDialog(null))}
+          onOpenDisk={openDiskFromHealth}
           onDelete={(targets) => {
             setConfirm({
               title: "清除失效项目",
@@ -2002,13 +2022,24 @@ export default function App() {
         <SettingsDialog
           closeAction={closeAction}
           defaultInteraction={defaultInteraction}
-          onClose={() => animateModalClose(() => setSettingsOpen(false))}
+          initial={settingsOpen}
+          onClose={() => animateModalClose(() => setSettingsOpen(null))}
+          onOpenProviders={openProviders}
+          onToast={showToast}
+          onOpenTrash={() => {
+            // 设置中心磁盘页的「查看回收站」：先播设置弹窗出场再开回收站
+            animateModalClose(() => {
+              setSettingsOpen(null);
+              setTrashOpen(true);
+            });
+          }}
           onSave={async (action, interaction) => {
             setCloseAction(action);
             // 两种 tab 共存：改默认只影响之后新开的 tab，已开的不动（简报 §5）
             setDefaultInteraction(interaction);
             await persistConfig(order, pinnedSessions, dark, action, interaction);
-            animateModalClose(() => setSettingsOpen(false));
+            // force：动作成功路径按铁律①直通结算（本弹窗未设 canClose，force 为语义占位）
+            animateModalClose(() => setSettingsOpen(null), true);
             showToast("设置已保存");
           }}
         />

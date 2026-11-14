@@ -18,7 +18,12 @@ import {
   type Config,
   type ProviderInfo,
 } from "./config";
+import { claudeConfigDir } from "./paths";
 import { detectVendor, queryUsage, type UsageResult } from "./usage-query";
+
+// claudeConfigDir 定义在 paths.ts（供应商与 cc 系配置模块共用的配置根出口），
+// 这里再导出维持本模块的既有引用面。
+export { claudeConfigDir };
 
 /** 供应商清单（供 list/save/... 命令返回） */
 export interface ProviderListState {
@@ -41,17 +46,6 @@ export interface ProviderImportOutcome {
 }
 
 // ---------------- 路径解析 ----------------
-
-/**
- * 用户级 Claude 配置目录：CLAUDE_CONFIG_DIR 环境变量优先，否则 ~/.claude。
- * 与 v2.0.0 claude_config_dir 同优先级（Windows 用 USERPROFILE、macOS/Linux 用 HOME）。
- */
-export function claudeConfigDir(): string {
-  const env = process.env.CLAUDE_CONFIG_DIR?.trim();
-  if (env && env.length > 0) return env;
-  const home = process.env.USERPROFILE ?? process.env.HOME ?? "";
-  return path.join(home, ".claude");
-}
 
 /**
  * live settings 路径：settings.json 优先，遗留 claude.json 存在时回退，
@@ -232,6 +226,13 @@ export interface SwitchResult {
 }
 
 /**
+ * 切换时需要「键跟随」的 settings.json 顶层键：这些键由设置中心（权限规则 / Hooks /
+ * 插件启停）或用户在 Claude Code 内手工维护，不属于任何供应商模板的语义。
+ * 模板里没写的键若不处理，整文件替换会把它们静默回滚成旧快照。
+ */
+const CARRYOVER_KEYS = ["permissions", "hooks", "enabledPlugins"] as const;
+
+/**
  * 切换核心（顺序固定，与 v2.0.0 一致）：
  * 1) 回填：live 整文件写回离任供应商（吸收用户在 Claude Code 里的手工修改；
  *    live 缺失/损坏仅告警不阻塞；live 指纹与离任条目不符时跳过回填仅告警）。
@@ -251,6 +252,9 @@ export function switchProviderFrom(
   if (!target) throw new Error(`供应商 ${targetId} 不存在`);
   const warnings: string[] = [];
   const settingsPath = claudeSettingsPathFrom(configDir);
+  // 切换前 live 只读一次、两处共用：回填用它吸收手工修改，键跟随用它携带
+  // 模板未指定的键（两处各读各的会撞上 CLI 中途回写，前后不一致）
+  const liveBefore = readJsonObject(settingsPath);
 
   if (currentId !== targetId) {
     const cur = currentId;
@@ -258,16 +262,15 @@ export function switchProviderFrom(
       const slot = providers.find((p) => p.id === cur);
       if (slot) {
         // 同 importDefaultFrom：只吸收对象形态的 live（非对象/损坏一律 backfill_failed）
-        const live = readJsonObject(settingsPath);
-        if (live !== null) {
-          const liveFp = extractFingerprint(live);
+        if (liveBefore !== null) {
+          const liveFp = extractFingerprint(liveBefore);
           const slotFp = extractFingerprint(slot.settingsConfig);
           // 两侧指纹可判定且不一致 = live 已不属于离任供应商，跳过回填仅告警
           if (liveFp && slotFp && !fingerprintEqual(liveFp, slotFp)) {
             warnings.push(`backfill_skipped:${cur}`);
           } else {
             // 指纹一致（吸收手工修改）或无法判定（无 env 等退化情况）→ 整文件吸收
-            slot.settingsConfig = live;
+            slot.settingsConfig = liveBefore;
           }
         } else {
           warnings.push(`backfill_failed:${cur}`);
@@ -292,7 +295,24 @@ export function switchProviderFrom(
   if (Object.keys(targetObj).length === 0) {
     throw new Error(`供应商 ${targetId} 的配置为空，拒绝用它覆盖 settings.json`);
   }
-  writeLiveIfChanged(settingsPath, targetObj);
+  // 键跟随（只对真实切换生效；切给自己语义就是「用存储配置整文件覆盖 live」，
+  // 带上 live 的键反而破坏「重置漂移」的本意）。规则：模板**含**该键 → 模板赢
+  // （选这个模板就是选它的内容）；模板**不含** → 从切换前 live 带过去，避免
+  // 设置中心里改过的 permissions/hooks/enabledPlugins 被旧快照静默回滚。
+  // ⚠️ 必须写到浅拷贝上：targetObj 与条目存储的 settingsConfig 是同一引用，
+  // 直接往上补键会把 carryover 键灌进清单里污染模板。
+  const merged: Record<string, unknown> = { ...targetObj };
+  if (currentId !== targetId && liveBefore !== null) {
+    for (const k of CARRYOVER_KEYS) {
+      if (
+        !Object.prototype.hasOwnProperty.call(merged, k) &&
+        Object.prototype.hasOwnProperty.call(liveBefore, k)
+      ) {
+        merged[k] = liveBefore[k];
+      }
+    }
+  }
+  writeLiveIfChanged(settingsPath, merged);
   return { warnings, currentId: newCurrent };
 }
 

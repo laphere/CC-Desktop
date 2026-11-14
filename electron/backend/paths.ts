@@ -189,6 +189,18 @@ export function resolveRootDir(
   return r;
 }
 
+/**
+ * 用户级 Claude 配置目录：CLAUDE_CONFIG_DIR 环境变量优先，否则 ~/.claude。
+ * 供应商模块与 cc 系配置模块（插件/MCP/技能/权限）共用这一个出口——配置根的
+ * 判定逻辑只此一份，避免两边漂移成「同一台机器定位到不同根」。
+ */
+export function claudeConfigDir(env: NodeJS.ProcessEnv = process.env): string {
+  const cfg = (env.CLAUDE_CONFIG_DIR ?? "").trim();
+  if (cfg) return cfg;
+  const home = env.USERPROFILE ?? env.HOME ?? "";
+  return path.join(home, ".claude");
+}
+
 /** Claude Code 项目目录（会话 jsonl 所在）：`<Claude 数据目录>/projects`。
  *  优先级：
  *  1. `CLAUDE_CONFIG_DIR` 环境变量（官方支持的自定义数据目录）；

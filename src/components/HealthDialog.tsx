@@ -1,14 +1,19 @@
 import { useEffect, useState, type ReactNode } from "react";
 import type { ClaudeUpdateStatus, Project } from "../types";
+import type { DiskUsage } from "../../electron/ipc-contract";
 import { api } from "../lib/api";
 import Modal from "./Modal";
-import { CheckIcon, XIcon } from "./Icons";
+import { CheckIcon, HardDriveIcon, XIcon } from "./Icons";
+import { fmtBytes } from "./settings/shared";
+import { DISK_LABELS } from "./settings/pages-config";
 
 interface Props {
   items: Project[];
   claudeOk: boolean | null;
   onClose: () => void;
   onDelete: (items: Project[]) => void;
+  /** 磁盘段「在设置中查看全部」：App 侧先关本弹窗再开设置中心磁盘页 */
+  onOpenDisk: () => void;
 }
 
 /** Windows 上显示 Win 环境徽标 */
@@ -18,11 +23,26 @@ type UpgradeTip = { kind: "ok" | "warn" | "error"; text: string; log?: string };
 
 /** 手动健康检查：打开时现场重新检查所有目录（后台执行，不卡界面）。
  *  「清除」交给 App 弹确认框：从列表移除 + 删除 Claude Code 会话数据 */
-export default function HealthDialog({ items, claudeOk, onClose, onDelete }: Props) {
+export default function HealthDialog({ items, claudeOk, onClose, onDelete, onOpenDisk }: Props) {
   const [checked, setChecked] = useState<Project[] | null>(null);
   const [verStatus, setVerStatus] = useState<ClaudeUpdateStatus | null>(null);
   const [upgrading, setUpgrading] = useState(false);
   const [upgradeTip, setUpgradeTip] = useState<UpgradeTip | null>(null);
+  const [disk, setDisk] = useState<DiskUsage | null>(null);
+
+  // 磁盘用量：后端有 10 分钟缓存，弹窗打开拉一次即可
+  useEffect(() => {
+    let disposed = false;
+    api
+      .ccDiskUsage()
+      .then((d) => {
+        if (!disposed) setDisk(d);
+      })
+      .catch(() => {});
+    return () => {
+      disposed = true;
+    };
+  }, []);
 
   const run = async () => {
     setChecked(null);
@@ -139,6 +159,35 @@ export default function HealthDialog({ items, claudeOk, onClose, onDelete }: Pro
             )}
           </div>
           <div className={missing.length ? "text-danger" : ""}>{summary}</div>
+        </div>
+
+        <div className="env-section">磁盘占用</div>
+        <div className="env-check">
+          <div className="env-check-head">
+            <div className="env-check-title">
+              <span className="inline-icon">
+                <HardDriveIcon size={11} />
+              </span>{" "}
+              ~/.claude 数据目录
+            </div>
+            {disk && <span className="tag tag-ok">{fmtBytes(disk.total)}</span>}
+          </div>
+          <div className="env-rows">
+            {(disk?.buckets ?? [])
+              .slice()
+              .sort((a, b) => b.size - a.size)
+              .slice(0, 3)
+              .map((b) => (
+                <div key={b.name} className="env-row">
+                  <span className="env-label">{DISK_LABELS[b.name] ?? b.name}</span>
+                  <span className="env-value">{fmtBytes(b.size)}</span>
+                </div>
+              ))}
+            {!disk && <div className="env-row"><span className="env-label">统计中…</span></div>}
+          </div>
+          <button className="linkish" onClick={onOpenDisk}>
+            在设置中查看全部 →
+          </button>
         </div>
 
         <div className="env-section">本地环境检查</div>

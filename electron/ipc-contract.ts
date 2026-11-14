@@ -7,6 +7,45 @@
 // （`IPC_CHANNELS`），不在表里的一律拒绝。
 
 import type { ChatImage, ChatPermissionMode } from "./backend/chat";
+import type { CcScope, DefaultModeChain, HooksMap, PermissionRules } from "./backend/ccsettings";
+import type { DisabledHookEntry } from "./backend/ccstate";
+import type { McpListView, McpScope, McpServerView } from "./backend/ccmcp";
+import type { PluginListView } from "./backend/ccplugins";
+import type { AssetKind, AssetScope, AssetView, ClaudeMdView } from "./backend/ccassets";
+import type { DiskUsage } from "./backend/ccdisk";
+
+// cc 系视图类型在此再导出：渲染层统一从本契约表拿类型（与通道面同源）
+export type {
+  CcScope,
+  DefaultModeChain,
+  HooksMap,
+  PermissionRules,
+  DisabledHookEntry,
+  McpListView,
+  McpScope,
+  McpServerView,
+  PluginListView,
+  AssetKind,
+  AssetScope,
+  AssetView,
+  ClaudeMdView,
+  DiskUsage,
+};
+
+/** cc_perms_read 的返回：project 为 null = 未传 projectPath（用户级视角） */
+export interface CcPermsRead {
+  user: PermissionRules;
+  project: PermissionRules | null;
+  defaultMode: DefaultModeChain;
+}
+
+/** cc_hooks_read 的返回：disabled = 已停用 hook 条目**带内容**（app 数据根
+ *  ccstate.json）——停用时条目已从 settings.json 移出，内容只在这里有 */
+export interface CcHooksRead {
+  user: HooksMap;
+  project: HooksMap | null;
+  disabled: DisabledHookEntry[];
+}
 
 /** 置顶会话条目（与 config.json 里的形状一致） */
 export interface PinnedSessionPayload {
@@ -161,6 +200,39 @@ export interface IpcContract {
   window_destroy: void;
   /** 标题栏覆盖层跟随主题（Windows/Linux 的 WCO；macOS 为 no-op） */
   window_set_titlebar_theme: { dark: boolean };
+  // ---------- 设置中心：Claude Code 配置与扩展（cc 系，见 docs/settings-hub-plan.md） ----------
+  /** 权限规则：user+project 两组 + defaultMode 生效链（local > project > user）。
+   *  project 为 null = 没传 projectPath（用户级视角打开） */
+  cc_perms_read: { projectPath?: string };
+  /** 只覆盖 allow/deny/ask 三组；defaultMode / additionalDirectories 等 CLI 键不碰 */
+  cc_perms_write: { scope: CcScope; projectPath?: string; rules: PermissionRules };
+  /** hooks 两级全表 + 已停用条目（带内容，app 数据根 ccstate.json） */
+  cc_hooks_read: { projectPath?: string };
+  /** 整表写 hooks（读侧返回完整表、UI 编辑后原样写回，未知事件键不丢）；
+   *  disabled 为写后**全局**停用条目全集（带内容） */
+  cc_hooks_write: { scope: CcScope; projectPath?: string; hooks: HooksMap; disabled: DisabledHookEntry[] };
+  /** 插件 + marketplace 列表（installed_plugins.json 与 enabledPlugins 并集） */
+  cc_plugin_list: void;
+  /** 启停插件：只翻用户级 enabledPlugins 布尔位 */
+  cc_plugin_toggle: { id: string; enabled: boolean };
+  /** MCP 三 scope 列表（project/local 为空当没传 projectPath） */
+  cc_mcp_list: { projectPath?: string };
+  cc_mcp_save: { scope: McpScope; projectPath?: string; name: string; config: unknown };
+  cc_mcp_delete: { scope: McpScope; projectPath?: string; name: string };
+  /** .mcp.json 服务器的审批（enabled/disabled 名单，projects.<项目键> 下） */
+  cc_mcp_approve: { projectPath: string; name: string; approved: boolean };
+  /** 技能/子代理/命令清单；目录未创建返回 []（空态，不是错误） */
+  cc_assets_list: { kind: AssetKind; scope: AssetScope; projectPath?: string };
+  cc_asset_read: { kind: AssetKind; scope: AssetScope; projectPath?: string; name: string };
+  /** skill = 写 <name>/SKILL.md（目录按需创建）；agent/command = 写 <name>.md（支持嵌套段） */
+  cc_asset_write: { kind: AssetKind; scope: AssetScope; projectPath?: string; name: string; content: string };
+  /** 删除进 app 回收站（trash/cc-assets/<时间戳>/），返回备份路径 */
+  cc_asset_delete: { kind: AssetKind; scope: AssetScope; projectPath?: string; name: string };
+  /** 两级 CLAUDE.md（missing = 尚未创建，保存即创建）；imports 只展示 */
+  cc_claudemd_read: { scope: AssetScope; projectPath?: string };
+  cc_claudemd_write: { scope: AssetScope; projectPath?: string; content: string };
+  /** ~/.claude 分桶磁盘用量（主进程缓存 10 分钟） */
+  cc_disk_usage: void;
 }
 
 export type IpcChannel = keyof IpcContract;
@@ -241,6 +313,23 @@ export const IPC_CHANNELS = [
   "window_hide",
   "window_destroy",
   "window_set_titlebar_theme",
+  "cc_perms_read",
+  "cc_perms_write",
+  "cc_hooks_read",
+  "cc_hooks_write",
+  "cc_plugin_list",
+  "cc_plugin_toggle",
+  "cc_mcp_list",
+  "cc_mcp_save",
+  "cc_mcp_delete",
+  "cc_mcp_approve",
+  "cc_assets_list",
+  "cc_asset_read",
+  "cc_asset_write",
+  "cc_asset_delete",
+  "cc_claudemd_read",
+  "cc_claudemd_write",
+  "cc_disk_usage",
 ] as const;
 
 // ---------------- 白名单与契约的双向断言（编译期） ----------------
