@@ -22,6 +22,9 @@ export interface AssetView {
   dir: string | null;
   /** SKILL.md / 条目 frontmatter 里的 description（没有则 null） */
   description: string | null;
+  /** skill：目录本身是符号链接/联接（编辑写透至解析目标、删除只移链接，见
+   *  movePathToTrash）；agent/command 恒为 false（递归扫描不跟进链接） */
+  isLink: boolean;
   size: number;
   mtime: number;
 }
@@ -153,6 +156,14 @@ export async function listAssets(
       if (!existsDir(dir)) continue;
       const sp = skillFilePath(dir);
       if (!existsFile(sp)) continue; // 有目录没 SKILL.md = 半成品，不列
+      // 列表项区分链接目录（UI 据此提示写透）；existsDir 已确认解析目标是目录，
+      // 这里只补记原始形态
+      let isLink = false;
+      try {
+        isLink = fs.lstatSync(dir).isSymbolicLink();
+      } catch {
+        // 极端竞态下条目刚消失：按普通目录展示，读/写/删各有自己的存在性校验
+      }
       const fm = (() => {
         try {
           return parseFrontmatter(fs.readFileSync(sp, "utf8"));
@@ -161,7 +172,7 @@ export async function listAssets(
         }
       })();
       const { size, mtime } = statOf(sp);
-      out.push({ name: e.name, path: sp, dir, description: fm.description ?? null, size, mtime });
+      out.push({ name: e.name, path: sp, dir, description: fm.description ?? null, isLink, size, mtime });
     }
     return out.sort((a, b) => a.name.localeCompare(b.name));
   }
@@ -171,6 +182,7 @@ export async function listAssets(
     path: p,
     dir: null,
     description: markdownDescription(p),
+    isLink: false,
     ...statOf(p),
   }));
   return views.sort((a, b) => a.name.localeCompare(b.name));

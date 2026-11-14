@@ -6479,6 +6479,9 @@ html.ctrl-links .md-body a {
   margin-bottom: 8px;
   flex-wrap: wrap;
 }
+.cc-editor-notice {
+  margin-bottom: 8px;
+}
 .cc-imports {
   display: flex;
   flex-wrap: wrap;

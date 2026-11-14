@@ -402,6 +402,7 @@ function AssetEditor({
   onSave,
   onCancel,
   saving,
+  notice,
 }: {
   path: string;
   value: string;
@@ -409,6 +410,8 @@ function AssetEditor({
   onSave: () => void;
   onCancel: () => void;
   saving: boolean;
+  /** 编辑区顶部的一行提示（如链接条目的写透警示）；不传不占位 */
+  notice?: string;
 }) {
   return (
     <div className="cc-card-open">
@@ -423,6 +426,7 @@ function AssetEditor({
           </button>
         </span>
       </div>
+      {notice && <div className="cc-hint cc-editor-notice">{notice}</div>}
       <textarea className="cc-editor" spellCheck={false} value={value} onChange={(e) => onChange(e.target.value)} />
     </div>
   );
@@ -475,6 +479,12 @@ function TextAssetPage({
   const openNew = async () => {
     const name = newName.trim();
     if (!name) return;
+    // Windows/macOS 默认文件系统大小写不敏感，同名不同大小写也会落进同一目录
+    const dup = list.find((v) => v.name.toLowerCase() === name.toLowerCase());
+    if (dup) {
+      onToast?.(`已存在同名${kindLabel}「${dup.name}」，请直接编辑`);
+      return;
+    }
     setCreating(false);
     setNewName("");
     // 直接进入编辑态，保存时才落盘
@@ -592,6 +602,7 @@ function TextAssetPage({
             title={
               <>
                 {v.name}
+                {v.isLink ? <Badge kind="mut">链接</Badge> : null}
                 {v.description ? null : <Badge kind="mut">无描述</Badge>}
               </>
             }
@@ -628,6 +639,11 @@ function TextAssetPage({
           onSave={saveExisting}
           onCancel={() => setOpenPath(null)}
           saving={saving}
+          notice={
+            list.find((v) => v.path === openPath)?.isLink
+              ? "此目录是符号链接：保存会写透至链接指向的源目录（如 ~/.agents/skills 的共享技能）"
+              : undefined
+          }
         />
       )}
 

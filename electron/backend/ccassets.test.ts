@@ -63,6 +63,7 @@ describe("技能读写删", () => {
     expect(list).toHaveLength(1);
     expect(list[0].name).toBe("my-skill");
     expect(list[0].description).toBe("做事");
+    expect(list[0].isLink).toBe(false);
 
     const backup = deleteAsset("skill", tmp, "user", null, "my-skill", trash);
     expect(fs.existsSync(backup)).toBe(true);
@@ -93,6 +94,7 @@ describe("技能读写删", () => {
     const list = await listAssets("skill", tmp, "user", null);
     expect(list.map((v) => v.name)).toEqual(["linked-skill"]);
     expect(list[0].description).toBe("链接技能");
+    expect(list[0].isLink).toBe(true);
     expect(fs.readFileSync(list[0].path, "utf8")).toContain("正文");
   });
 
