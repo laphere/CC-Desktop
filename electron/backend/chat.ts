@@ -556,6 +556,10 @@ export class SdkMessageTranslator {
     // 都在这帧上——重试等待期没有其它帧，交给前端显示重连状态。字段缺失按「拿不到就
     // 不给」处理（0 / null），不编默认的重试上限。
     if (m.subtype === "api_retry") {
+      // 在途请求已死，它的开块不会再有 content_block_stop：清掉 pending，防止重试
+      // 后同 index 的新块没发 start 帧（或迟到帧撞旧键）时拿旧 startedAt 量出含整个
+      // 断流窗口的假时长
+      this.blocks.clear();
       const nr = m.no_response as Rec | undefined;
       return [
         {

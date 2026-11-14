@@ -21,6 +21,7 @@ import {
 } from "react";
 import { Channel } from "../lib/channel";
 import { api } from "../lib/api";
+import { settleStaleThinking } from "../lib/chat-items";
 import { viewTransition } from "../lib/view-transition";
 import { cacheHitRate, fmtHitRate } from "../lib/token-stats";
 import {
@@ -776,15 +777,22 @@ export default function ChatView({
       case "content_start":
         // 模型开始产出内容块，思考估算就到此为止（胶囊换文案，别挂着旧数字）
         setThinkingTokens(null);
-        setItems((prev) => {
-          const id = nextItemId++;
-          return ev.kind === "text"
-            ? [...prev, { id, kind: "text", text: "", streaming: true }]
-            : [
-                ...prev,
-                { id, kind: "thinking", text: "", streaming: true, startedAt: ev.startedAt },
-              ];
-        });
+        // 块按序开合：下一块开工即上一块已闭。还挂着流式说明上一块的收口帧永远
+        // 不会来了（断流/重试残块），先定稿再追加，活秒表不许跨块续走。
+        // now 在 updater 外取：updater 保持纯函数（StrictMode 下会双调）
+        {
+          const now = Date.now();
+          setItems((prev) => {
+            const base = settleStaleThinking(prev, now);
+            const id = nextItemId++;
+            return ev.kind === "text"
+              ? [...base, { id, kind: "text", text: "", streaming: true }]
+              : [
+                  ...base,
+                  { id, kind: "thinking", text: "", streaming: true, startedAt: ev.startedAt },
+                ];
+          });
+        }
         break;
       case "delta": {
         if (ev.kind === "tool_input") break; // tool input 由 tool_use_complete 整体呈现
@@ -819,23 +827,28 @@ export default function ChatView({
         });
         break;
       case "tool_use_start":
-        setItems((prev) => {
-          if (prev.some((it) => it.kind === "tool_use" && it.toolUseId === ev.toolUseId)) {
-            return prev;
-          }
-          return [
-            ...prev,
-            {
-              id: nextItemId++,
-              kind: "tool_use",
-              toolUseId: ev.toolUseId,
-              name: ev.name,
-              input: null,
-              hasResult: false,
-              isError: false,
-            },
-          ];
-        });
+        // 工具块开工即前面的思考块已闭（同 content_start 的道理）：断流残块先定稿
+        {
+          const now = Date.now();
+          setItems((prev) => {
+            const base = settleStaleThinking(prev, now);
+            if (base.some((it) => it.kind === "tool_use" && it.toolUseId === ev.toolUseId)) {
+              return base;
+            }
+            return [
+              ...base,
+              {
+                id: nextItemId++,
+                kind: "tool_use",
+                toolUseId: ev.toolUseId,
+                name: ev.name,
+                input: null,
+                hasResult: false,
+                isError: false,
+              },
+            ];
+          });
+        }
         break;
       case "tool_use_complete":
         setItems((prev) => {
@@ -904,6 +917,13 @@ export default function ChatView({
         // 把死会话重新点亮）。这里**不翻 phase**——重试帧属于当前轮，若状态已 idle，
         // 说明是迟到帧，拉起一个没有轮次的「思考中」只会拦发送、给一个停不掉的停止键
         setStatus((s) => (s.phase === "thinking" ? { ...s, retry: { ...ev, receivedAt: Date.now() } } : s));
+        // 在途请求已死，它的开块不会再有收口帧：残块的活秒表就地定稿，别让它一路
+        // 走到轮末（重试若发生在思考中途，残块 + 重试块两块时钟重叠，组摘要会翻倍）。
+        // now 在 updater 外取：updater 保持纯函数（StrictMode 下会双调）
+        {
+          const now = Date.now();
+          setItems((prev) => settleStaleThinking(prev, now));
+        }
         break;
       case "permission_request":
         // 提问单独成卡（选项有语义，不能当普通工具卡把 input 打成 JSON 丢给用户看）

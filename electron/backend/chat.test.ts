@@ -285,6 +285,28 @@ describe("模型请求失败重试（system/api_retry）", () => {
       },
     ]);
   });
+
+  it("重试清掉在途请求的开块：旧块的迟到 stop 不再产出含断流窗口的假时长", () => {
+    const t = new SdkMessageTranslator();
+    // attempt 1：thinking 块开流后连接死亡（api_retry），残留的开块拿不到收口帧
+    t.translate(
+      msg({ type: "stream_event", event: { type: "content_block_start", index: 0, content_block: { type: "thinking" } } }),
+    );
+    t.translate(
+      msg({ type: "system", subtype: "api_retry", attempt: 1, max_retries: 10, retry_delay_ms: 1000, error_status: null, error: "unknown" }),
+    );
+    expect(t.translate(msg({ type: "stream_event", event: { type: "content_block_stop", index: 0 } }))).toEqual([]);
+    // attempt 2：同 index 的新块从 start 到 stop 正常实测，不受残块影响
+    t.translate(
+      msg({ type: "stream_event", event: { type: "content_block_start", index: 0, content_block: { type: "thinking" } } }),
+    );
+    const out = t.translate(msg({ type: "stream_event", event: { type: "content_block_stop", index: 0 } }));
+    expect(out).toHaveLength(1);
+    const done = out[0] as { type: string; durationMs: number };
+    expect(done.type).toBe("thinking_done");
+    // start/stop 同步连续调用，实测应为亚毫秒级：钉死「没继承 attempt 1 残块的 startedAt」
+    expect(done.durationMs).toBeLessThan(1000);
+  });
 });
 
 describe("tool_use", () => {
