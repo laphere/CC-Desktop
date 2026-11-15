@@ -6749,6 +6749,16 @@ html.ctrl-links .md-body a {
   padding: 6px 8px;
   outline: none;
 }
+/* 编辑型页面容器（CLAUDE.md）：内容撑满内容区可见高度，编辑区吃掉剩余空间，不留底部大片空白 */
+.cc-page-fill {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+.cc-page-fill .cc-editor {
+  flex: 1;
+  resize: none; /* 高度已由 flex 撑满，手动拽高无效也无意义 */
+}
 /* 文本编辑器（SKILL.md / 子代理 / 命令 / CLAUDE.md） */
 .cc-editor {
   display: block;

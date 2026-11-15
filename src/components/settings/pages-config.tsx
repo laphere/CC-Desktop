@@ -482,7 +482,7 @@ export function ClaudeMdPage({ scope, projectPath, onToast }: { scope: AssetScop
   };
 
   return (
-    <>
+    <div className="cc-page-fill">
       <div className="cc-editor-head">
         <span className="mono cc-hint">{data.path}{data.missing ? " · 尚未创建，保存即创建" : ""}</span>
         <button type="button" className="btn btn-sm btn-primary" disabled={saving || text === data.content} onClick={save}>
@@ -501,7 +501,7 @@ export function ClaudeMdPage({ scope, projectPath, onToast }: { scope: AssetScop
       )}
       <textarea className="cc-editor" spellCheck={false} value={text} onChange={(e) => setText(e.target.value)} />
       <EffectiveHint />
-    </>
+    </div>
   );
 }
 
