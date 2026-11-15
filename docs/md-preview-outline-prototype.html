@@ -1,0 +1,581 @@
+<title>md 预览大纲面板（Typora 式双栏）· UI 方案</title>
+<style>
+  /* ============ 外层页面（方案文档本身，双主题自适应宿主） ============ */
+  :root {
+    --page-bg: #f4f2ee;
+    --page-panel: #fbfaf8;
+    --ink: #292524;
+    --ink-muted: #78716c;
+    --ink-dim: #a8a29e;
+    --line: #e2ded4;
+    --accent: #c15f3c;
+    --accent-soft: rgba(193, 95, 60, 0.12);
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --page-bg: #20201d;
+      --page-panel: #262522;
+      --ink: #ece9e2;
+      --ink-muted: #a8a29e;
+      --ink-dim: #6f6a63;
+      --line: #383530;
+      --accent: #d97757;
+      --accent-soft: rgba(217, 119, 87, 0.16);
+      color-scheme: dark;
+    }
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  button { font-family: inherit; }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  [data-icon] { display: inline-flex; align-items: center; flex-shrink: 0; }
+
+  body {
+    font-family: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+    font-size: 13px;
+    color: var(--ink);
+    background: var(--page-bg);
+    line-height: 1.6;
+  }
+
+  .page { max-width: 1180px; margin: 0 auto; padding: 30px 20px 48px; }
+
+  .page-head h1 { font-size: 20px; font-weight: 600; letter-spacing: 0.2px; }
+  .page-lead { color: var(--ink-muted); font-size: 13px; margin: 4px 0 18px; max-width: 76ch; }
+  .page-lead code { background: var(--page-panel); border: 1px solid var(--line); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+
+  /* ============ 演示帧 ============ */
+  .frame-note { font-size: 12px; color: var(--ink-dim); margin-bottom: 8px; }
+  .frame {
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    overflow: hidden;
+    box-shadow: 0 1px 2px rgba(0,0,0,.05), 0 18px 44px rgba(0,0,0,.10);
+    height: 640px;
+    width: 1120px;
+    margin: 0 auto;
+  }
+
+  /* 宽度滑杆（模拟窗口拖拽） */
+  .width-row { display: flex; align-items: center; gap: 10px; justify-content: center; margin: 14px auto 4px; max-width: 720px; }
+  .width-row label { font-size: 12px; color: var(--ink-muted); flex-shrink: 0; }
+  .width-row input[type="range"] { flex: 1; accent-color: var(--accent); }
+  .width-readout { font-size: 11.5px; color: var(--ink-muted); font-family: Consolas, "Courier New", monospace; flex-shrink: 0; min-width: 300px; }
+
+  /* ============ 演示 chips（本页演示控件，不是 app UI） ============ */
+  .try-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 14px 0 6px; }
+  .try-label { font-size: 12px; color: var(--ink-muted); }
+  .try-label strong { color: var(--ink); font-weight: 600; }
+  .chip {
+    display: inline-flex; align-items: center; justify-content: center; line-height: 1;
+    padding: 5px 12px; border-radius: 999px; border: 1px solid var(--line);
+    background: var(--page-panel); color: var(--ink-muted); font-size: 12px; cursor: pointer;
+    transition: border-color .12s, color .12s;
+  }
+  .chip:hover { border-color: var(--accent); color: var(--accent); }
+  .chip.on { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+
+  /* ============ 决策卡片 ============ */
+  .decisions { display: grid; grid-template-columns: repeat(auto-fill, minmax(316px, 1fr)); gap: 12px; margin-top: 18px; }
+  .decision { background: var(--page-panel); border: 1px solid var(--line); border-radius: 10px; padding: 13px 15px; }
+  .decision h3 { font-size: 12.5px; font-weight: 600; display: flex; align-items: center; gap: 7px; margin-bottom: 4px; }
+  .decision h3 [data-icon] { color: var(--accent); }
+  .decision p { font-size: 12px; color: var(--ink-muted); }
+  .decision p code { background: var(--page-bg); border: 1px solid var(--line); padding: 0 4px; border-radius: 3px; font-size: 11px; }
+
+  .footnote { margin-top: 16px; font-size: 11.5px; color: var(--ink-dim); border-top: 1px dashed var(--line); padding-top: 10px; max-width: 96ch; }
+  .footnote code { background: var(--page-panel); border: 1px solid var(--line); padding: 0 4px; border-radius: 3px; font-size: 11px; }
+
+  /* ================================================================
+     claude-fast app 本体的视觉语言（tokens / 结构照搬 styles.css）
+     作用域限定 #frame；app 自带浅/深两套主题，帧外按钮切换
+     ================================================================ */
+  #frame {
+    --bg: #f9f8f5; --panel: #ffffff; --panel-2: #f1efe9; --border: #e5e2da;
+    --text: #292524; --muted: #635e58; --dim: #8f8981;
+    --accent: #c15f3c; --accent-hover: #a84e2e; --accent-soft: rgba(193,95,60,.12);
+    --radius: 10px;
+    --shadow: 0 1px 2px rgba(0,0,0,.05), 0 8px 24px rgba(0,0,0,.08);
+    --font-mono: Consolas, "Courier New", "Microsoft YaHei UI", "Microsoft YaHei", monospace;
+    --dur-fast: 100ms; --dur-med: 160ms; --dur-slow: 240ms;
+    --ease-out-soft: cubic-bezier(.25,1,.5,1); --ease-emph: cubic-bezier(.2,0,0,1);
+    color-scheme: light;
+  }
+  #frame[data-theme="dark"] {
+    --bg: #1f1e1b; --panel: #292724; --panel-2: #33302b; --border: #3d3a34;
+    --text: #f4f1ea; --muted: #a8a29e; --dim: #6f6a63;
+    --accent: #d97757; --accent-hover: #e08b6d; --accent-soft: rgba(217,119,87,.16);
+    --shadow: 0 1px 2px rgba(0,0,0,.45), 0 8px 24px rgba(0,0,0,.55);
+    color-scheme: dark;
+  }
+
+  /* ---- 浮层容器：深遮罩盖满整个窗口（含 WCO 区），z 950 ---- */
+  #frame .win { position: relative; height: 100%; overflow: hidden; font-size: 13px; }
+  #frame .overlay { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.78); }
+  #frame .overlay button { cursor: pointer; }
+
+  /* ---- WCO 系统按钮区（OS 绘制，浮层盖不到）：装饰性复刻 ---- */
+  #frame .wco { position: absolute; top: 0; left: 0; right: 0; height: 44px; display: flex; justify-content: flex-end; pointer-events: none; }
+  #frame .wco-btn { width: 46px; display: grid; place-items: center; color: rgba(255,255,255,.85); }
+
+  /* ---- 控件行 .fp-bar：让位自绘标题栏（top: titlebar+12 = 56px） ---- */
+  #frame .fp-bar { position: absolute; top: 56px; left: 16px; right: 16px; display: flex; align-items: center; gap: 8px; }
+  #frame .fp-name {
+    display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 50%;
+    padding: 6px 12px; border-radius: 8px; background: rgba(0,0,0,.55); color: #fff; font-size: 12px;
+  }
+  #frame .fp-kind { display: inline-flex; color: rgba(255,255,255,.8); }
+  #frame .fp-name .fp-file { font-weight: 600; white-space: nowrap; }
+  #frame .fp-name .fp-path { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: rgba(255,255,255,.62); font-family: var(--font-mono); font-size: 11px; }
+  #frame .fp-spacer { flex: 1; }
+  #frame .fp-btn {
+    height: 30px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    border: none; border-radius: 8px; background: rgba(0,0,0,.55); color: #fff; font-size: 12px; cursor: pointer;
+    transition: background var(--dur-fast);
+  }
+  #frame .fp-btn:hover { background: rgba(255,255,255,.2); }
+  #frame .fp-btn.fp-icon-only { width: 30px; padding: 0; }
+  #frame .fp-btn.fp-btn-text { padding: 0 12px 0 10px; }
+  /* ★ 新增：大纲开关的「开着」态（手动开关，md 态专属） */
+  #frame .fp-btn.on { background: var(--accent); }
+  #frame .fp-btn.on:hover { background: var(--accent-hover); }
+  /* [hidden] 会被按钮自身的 display:inline-flex 击穿（作者样式压过 UA 的 [hidden] 规则），显式补回 */
+  #frame .fp-btn[hidden] { display: none; }
+
+  /* ---- 内容区 .fp-stage：inset = titlebar+54 / 16 ---- */
+  #frame .fp-stage { position: absolute; top: 98px; left: 16px; right: 16px; bottom: 16px; display: flex; align-items: stretch; }
+
+  /* ★ 新增：md 态双栏布局——大纲卡（240px）+ 正文卡并排 */
+  #frame .fp-outline {
+    flex: 0 0 auto;
+    width: 240px;
+    margin-right: 12px;
+    background: var(--panel);
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+    overflow: hidden;
+    opacity: 1;
+    visibility: visible;
+    /* visibility 双向非对称：展开立即可见（0s），收起等动画播完再隐藏（delay）——
+       否则展开动画全程不可见 / 收起后键盘仍可聚焦残留条目 */
+    transition: width var(--dur-slow) var(--ease-emph), margin-right var(--dur-slow) var(--ease-emph), opacity var(--dur-slow) var(--ease-emph), visibility 0s;
+  }
+  #frame .fp-outline.collapsed {
+    width: 0; margin-right: 0; opacity: 0; visibility: hidden; pointer-events: none;
+    transition: width var(--dur-slow) var(--ease-emph), margin-right var(--dur-slow) var(--ease-emph), opacity var(--dur-slow) var(--ease-emph), visibility 0s var(--dur-slow);
+  }
+  #frame .fp-outline[hidden] { display: none; }
+  /* 内层定宽不重排（抽屉模式）：折叠只裁外层，大纲条目本身不折行 */
+  #frame .fp-outline-inner { position: relative; width: 240px; height: 100%; overflow-y: auto; padding: 10px 8px; }
+
+  #frame .fp-outline-item {
+    display: block; width: 100%; text-align: left;
+    padding: 5px 10px; border: none; border-radius: 7px; background: none;
+    color: var(--muted); font-size: 12px; line-height: 1.5;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    cursor: pointer; transition: background var(--dur-fast), color var(--dur-fast);
+  }
+  #frame .fp-outline-item:hover { background: var(--panel-2); color: var(--text); }
+  /* active 字色用 --accent-hover 而非 --accent：12px 加粗在 --accent-soft 叠底上
+     accent 只有 ~3.6:1（双主题都不达 AA），accent-hover 4.78/4.54 过线，与 .icon-btn-on 同口径 */
+  #frame .fp-outline-item.active { background: var(--accent-soft); color: var(--accent-hover); font-weight: 600; }
+
+  /* ---- 正文卡：与现状一致（面板满宽 + 版心居中） ---- */
+  #frame .fp-md-card {
+    flex: 1; min-width: 0;
+    background: var(--panel); border-radius: 12px; box-shadow: var(--shadow);
+    padding: 26px 30px; overflow-y: auto;
+    user-select: text;
+  }
+  #frame .fp-md-card > .md-body { max-width: min(1240px, 92%); margin: 0 auto; }
+
+  /* ---- .md-body 排版复刻（照搬 styles.css 2005-2145 的关键规则） ---- */
+  #frame .md-body { font-size: 14.5px; line-height: 1.8; word-break: break-word; color: var(--text); }
+  #frame .md-body > *:first-child { margin-top: 0; }
+  #frame .md-body > *:last-child { margin-bottom: 0; }
+  #frame .md-body p { margin: .95em 0; }
+  #frame .md-body h1, #frame .md-body h2, #frame .md-body h3, #frame .md-body h4 { margin: 1.5em 0 .55em; line-height: 1.35; font-weight: 600; }
+  #frame .md-body h1 { font-size: 1.42em; }
+  #frame .md-body h2 { font-size: 1.26em; }
+  #frame .md-body h3 { font-size: 1.1em; }
+  #frame .md-body h4 { font-size: 1em; border-left: 3px solid var(--border); padding-left: 8px; }
+  #frame .md-body h2, #frame .md-body h3 { border-top: 1px solid var(--border); padding-top: .7em; }
+  #frame .md-body > h2:first-child, #frame .md-body > h3:first-child { border-top: none; padding-top: 0; }
+  #frame .md-body ul, #frame .md-body ol { margin: .6em 0; padding-left: 1.6em; }
+  #frame .md-body li + li { margin-top: .35em; }
+  #frame .md-body code { font-size: 13.5px; font-family: var(--font-mono); color: var(--accent-hover); background: none; padding: 0; border-radius: 0; }
+  #frame .md-body blockquote { margin: .4em 0; padding: 2px 12px; border-left: 3px solid var(--border); color: var(--muted); }
+</style>
+
+<body>
+  <div class="page">
+    <div class="page-head">
+      <h1>md 预览大纲面板（Typora 式双栏）· UI 方案</h1>
+      <p class="page-lead">会话内 md 预览浮层增加左侧大纲：窗口 ≥<code>1120px</code> 双栏展示、<code>&lt;1080px</code> 自动折叠、<code>&gt;1120px</code> 自动恢复（40px 迟滞），顶栏按钮手动开关（手动态优先于自动）；点击大纲平滑跳转、正文滚动时高亮当前章节并居中跟随。帧内所有交互可点，滑杆可拖。</p>
+    </div>
+
+    <div class="try-row" id="try-row">
+      <span class="try-label">演示：</span>
+      <button class="chip on" id="chip-long" type="button">多级长文档</button>
+      <button class="chip" id="chip-plain" type="button" title="无标题文档：大纲面板与开关都不渲染，布局与现状一致">无标题文档</button>
+      <button class="chip" id="chip-drag" type="button" title="自动从 1280 拖窄到 950 再拉宽到 1300，演示迟滞带自动折叠/恢复">拖窄→拉宽演示</button>
+      <span style="flex:1"></span>
+      <button class="chip" id="theme-btn" type="button" title="切换帧内深浅主题">主题</button>
+    </div>
+
+    <p class="frame-note">帧内为浮层复刻：深遮罩 + 控件行（文件名胶囊 / 大纲开关 / 资源管理器 / 关闭）+ 内容区；顶部一条是系统按钮让位区（WCO，浮层控件须避让）。列表标记为原生近似，实施沿用 app 的 markdown 管线。</p>
+
+    <div class="frame" id="frame">
+      <div class="win">
+        <div class="overlay">
+          <div class="fp-bar">
+            <div class="fp-name">
+              <span class="fp-kind" data-icon="fileText" data-size="14"></span>
+              <span class="fp-file">pipeline-migration.md</span>
+              <span class="fp-path">D:\MyWorkspaces\demo\docs\pipeline-migration.md</span>
+            </div>
+            <div class="fp-spacer"></div>
+            <button class="fp-btn fp-icon-only on" id="outline-toggle" title="大纲"></button>
+            <button class="fp-btn fp-btn-text" title="在资源管理器中定位该文件">
+              <span data-icon="folder" data-size="13"></span> 资源管理器
+            </button>
+            <button class="fp-btn fp-icon-only" title="关闭（Esc）"><span data-icon="x" data-size="15"></span></button>
+          </div>
+          <div class="fp-stage">
+            <aside class="fp-outline" id="fp-outline">
+              <div class="fp-outline-inner" id="fp-outline-list"></div>
+            </aside>
+            <div class="fp-md-card" id="fp-md-card">
+              <div class="md-body" id="md-body"></div>
+            </div>
+          </div>
+        </div>
+        <div class="wco">
+          <span class="wco-btn" data-icon="minimize" data-size="14"></span>
+          <span class="wco-btn" data-icon="maximize" data-size="13"></span>
+          <span class="wco-btn" data-icon="x" data-size="14"></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="width-row">
+      <label for="width-range">窗口宽度</label>
+      <input type="range" id="width-range" min="960" max="1600" step="10" value="1120" />
+      <span class="width-readout" id="width-readout"></span>
+    </div>
+
+    <div class="decisions">
+      <div class="decision">
+        <h3><span data-icon="panel" data-size="14"></span>双栏同面卡</h3>
+        <p>大纲卡与正文卡同用 <code>--panel</code> surface（radius 12 + shadow），<code>gap 12</code> 并排；正文版心（92%、上限 1240px）照旧居中，折叠后自动回到满宽。</p>
+      </div>
+      <div class="decision">
+        <h3><span data-icon="wcoMax" data-size="14"></span>宽度阈值与迟滞</h3>
+        <p>≥<code>1120</code> 显示、<code>&lt;1080</code> 折叠、<code>&gt;1120</code> 恢复，40px 迟滞 + 80ms 防抖（照左栏 980/1020 模式）；只自动恢复「被自动收起」的那次，手动关闭后拉宽不自动开。</p>
+      </div>
+      <div class="decision">
+        <h3><span data-icon="hand" data-size="14"></span>手动开关</h3>
+        <p>控件行加 PanelLeft 图标按钮（md 态专属），手动态 module 级记忆：本次运行内换文件、关开浮层都保留，不写 config。</p>
+      </div>
+      <div class="decision">
+        <h3><span data-icon="target" data-size="14"></span>点击跳转与 scrollspy</h3>
+        <p>点大纲平滑滚到标题（顶部留 <code>44px</code> 呼吸）；正文滚动以「卡顶 + <code>96px</code>」参考线定 active，大纲内 active 项居中跟随；位置全用实时 rect，图片加载移位不失效。</p>
+      </div>
+      <div class="decision">
+        <h3><span data-icon="shield" data-size="14"></span>空大纲兜底</h3>
+        <p>文档无标题时不渲染大纲面板与开关，布局与现状完全一致；html 预览完全不参与，iframe 态零改动。</p>
+      </div>
+      <div class="decision">
+        <h3><span data-icon="zap" data-size="14"></span>折叠动画</h3>
+        <p>抽屉模式：width 240→0 + 淡出，<code>--dur-slow</code> + <code>--ease-emph</code>（240ms），内层定宽不重排；单文档重折行成本可接受（与会话左栏禁 basis 动画的场景不同）。</p>
+      </div>
+    </div>
+
+    <p class="footnote">
+      实施落点：<code>src/components/FilePreviewOverlay.tsx</code>（大纲提取 / scrollspy / 开关 / 宽度自适应）+ <code>src/styles.css</code>（<code>.fp-outline*</code> 追加在 fp-* 块后）。阈值常量 <code>OUTLINE_COLLAPSE_BELOW = 1080</code> / <code>OUTLINE_EXPAND_ABOVE = 1120</code>，参考线 96px、跳转留白 44px、大纲宽 240px——实施评审时可再调。大纲收集 h1–h6（演示文档只到 h4），缩进按「层级 − 最小层级」clamp 0–4。
+    </p>
+  </div>
+
+<script>
+(function () {
+  "use strict";
+
+  /* ---------- 图标（Lucide 风格线性，照搬 app Icons.tsx 的画法口径） ---------- */
+  function svg(paths, size) {
+    return '<svg width="' + size + '" height="' + size + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + paths + '</svg>';
+  }
+  var ICONS = {
+    panel: function (s) { return svg('<rect x="3" y="4" width="18" height="16" rx="2"/><line x1="9" y1="4" x2="9" y2="20"/>', s); },
+    fileText: function (s) { return svg('<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/>', s); },
+    folder: function (s) { return svg('<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>', s); },
+    x: function (s) { return svg('<path d="M18 6 6 18M6 6l12 12"/>', s); },
+    minimize: function (s) { return svg('<line x1="5" y1="12" x2="19" y2="12"/>', s); },
+    maximize: function (s) { return svg('<rect x="5" y="5" width="14" height="14" rx="1.5"/>', s); },
+    sun: function (s) { return svg('<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M6.3 17.7l-1.4 1.4M19.1 4.9l-1.4 1.4"/>', s); },
+    moon: function (s) { return svg('<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>', s); },
+    target: function (s) { return svg('<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><line x1="12" y1="2" x2="12" y2="5"/>', s); },
+    hand: function (s) { return svg('<path d="M18 11V6a2 2 0 0 0-4 0v5M14 10V4a2 2 0 0 0-4 0v6M10 10.5V6a2 2 0 0 0-4 0v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/>', s); },
+    shield: function (s) { return svg('<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/>', s); },
+    zap: function (s) { return svg('<path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/>', s); },
+    wcoMax: function (s) { return svg('<rect x="4" y="4" width="16" height="16" rx="2"/><line x1="4" y1="10" x2="20" y2="10"/>', s); },
+  };
+
+  /* ---------- 演示文档 ---------- */
+  var DOC_LONG = [
+    '<h1>数据管道迁移方案（讨论稿）</h1>',
+    '<p>日期：2026-11-16 · 状态：讨论稿，未定方案、未改代码。关联材料：<code>plans/pipeline-migration.html</code>（方案页）、<code>docs/queue-bench.md</code>（压测记录）。</p>',
+    '<p>本文档梳理采集数据管道的迁移动机、目标架构与分阶段实施步骤。现有 <code>collector</code> 服务以单进程消费队列，高峰期积压明显，且节点领取逻辑与平台判断耦合在一个模块里，改动半径大。目标是在不动数据面的前提下，把领取、分流与落库拆成可独立发布的单元。</p>',
+    '<h2>背景与目标</h2>',
+    '<p>现网每天约 4200 万条采集事件经由统一队列进入落库层。历史原因是按「 web 优先」设计的：队列里没有平台维度，所有消费者默认按 web 口径处理，移动端接入后只能在消费侧打补丁。这次迁移要解决三件事：</p>',
+    '<ul><li>把平台维度下沉到领取层，节点只领自己能处理的事件；</li><li>把落库从单进程拆成按平台分组的 worker 池，故障域互相隔离；</li><li>灰度期间新旧管道双写，可随时回切。</li></ul>',
+    '<h3>现状核对（2026-11-16）</h3>',
+    '<p>与运维核对过的现状：<code>collector</code> 单副本部署，峰值 CPU 87%；积压告警阈值 5 分钟，月均触发 3.2 次；回滚只能整进程回退，粒度太粗。</p>',
+    '<ul><li>队列：单 topic，无分区键；</li><li>消费：单进程循环 pull，批 200 条；</li><li>落库：web / mobile 共用一张写入锁，互相拖慢。</li></ul>',
+    '<h2>总体架构</h2>',
+    '<p>目标架构引入 <code>queue-bridge</code> 作为唯一的队列入口：它负责打平台标（写入 <code>device</code> 字段），再按平台写入两个子 topic。消费侧 <code>work-agent</code> 按 topic 领取，各配独立 worker 池。桥接层无状态，可以任意横扩。</p>',
+    '<h3>节点类型</h3>',
+    '<p>节点分两类：<code>web-node</code> 只消费 web topic，<code>mobile-node</code> 只消费 mobile topic。类型在启动时由配置决定，运行期不切换——切换等于重启，避免热切带来的半消费状态。</p>',
+    '<h4>领取过滤</h4>',
+    '<p><code>device</code> 字段是批次级字段，item 不单独携带：缺失、<code>null</code>、空字符串（trim 后）一律默认 <code>web</code>；有值时只接受精确的 <code>web</code> / <code>mobile</code>，其他值拒收并打点。不做回退兜底——错平台的任务静默换道比显式失败更难排查。</p>',
+    '<h3>数据面改动（推荐）</h3>',
+    '<p>表结构不动，只加两列：<code>device</code>（默认 web）与 <code>bridge_ver</code>（灰度标记）。索引加一个 <code>(device, created_at)</code> 组合。历史数据不回填，查询按默认值兜住。</p>',
+    '<h2>分流规则（已定）</h2>',
+    '<p>分流在 <code>queue-bridge</code> 完成，规则按优先级排列：显式声明 > 来源推断 > 默认值。声明来自任务提交方的请求头，推断只看提交方白名单，都不命中才落默认。</p>',
+    '<h3>平台区分：web / mobile 任务</h3>',
+    '<p><code>mobile</code> 只由移动端节点领取，<code>web</code> 只由 web 节点领取，不做跨平台转移。需要关注的边界：内嵌 H5 提交的任务声明是 mobile、实际语义是 web——这类在提交方治理，桥接层不猜。</p>',
+    '<h2>实施步骤</h2>',
+    '<p>分两步走，每步都有独立的回滚开关。第一步只加不改：桥接层上线但不下线旧路径，两边双写。</p>',
+    '<ol><li>桥接层上线，双写开启，对比两侧计数；</li><li>移动端切到新 topic，观察一周；</li><li>web 切换，旧消费者降级为只读；</li><li>回收旧路径，迁移完成。</li></ol>',
+    '<h3>第一步：双写灰度（当前目标）</h3>',
+    '<p>双写期间以旧管道为准、新管道对账：<code>bridge_ver</code> 标记新写入，每小时跑一次计数对比，偏差超过 0.1% 告警。这个阶段不改任何消费行为，回滚就是关开关。</p>',
+    '<h3>第二步：切换与回收（后续）</h3>',
+    '<p>切换顺序是先 mobile 后 web：mobile 量小（约 6%），出问题影响面可控。切换后旧消费者保留两周只读，用于补数，然后下线。</p>',
+    '<h2>灰度对账口径</h2>',
+    '<p>双写的可信度靠对账维持。对账脚本每小时跑一次，两侧各按小时分桶计数，输出偏差列；口径上的几处细节决定这份数据能不能看。</p>',
+    '<h3>计数口径</h3>',
+    '<p>只计业务事件，不计心跳与重试；<code>bridge_ver</code> 非空的写入归新管道，其余归旧管道。时钟以桥接层落队时间为准，不用落库时间——两端落库延迟不同步，用后者会出现系统性漂移。</p>',
+    '<h3>告警与处置</h3>',
+    '<p>偏差超过 0.1% 触发告警，值班先看归因再决定是否冻结切量。连续两个桶超阈值按事故处理，回滚开关直接关，不等复盘。</p>',
+    '<h4>偏差归因</h4>',
+    '<p>常见偏差来源按概率排序：提交方重复投递、对账窗口边缘的跨桶事件、移动端补传的历史批次。前两者等下一个桶自然对齐，最后一种要在对账脚本里做幂等剔除。</p>',
+    '<h2>回滚预案</h2>',
+    '<p>回滚按阶段不同粒度不同：双写阶段关开关即可，秒级生效；切换阶段回滚需要把 topic 消费位重置回切换前的快照，最长 10 分钟。两个阶段的回滚演练各做一次，不做「没演练过的回滚」。</p>',
+    '<h3>演练记录</h3>',
+    '<p>2026-11-14 已完成双写阶段回滚演练：关开关到流量全回旧路径 41 秒，无丢数。切换阶段演练排在切换前一天，用影子 topic 走全流程。</p>',
+    '<h2>风险与暂缓</h2>',
+    '<p>已识别的风险集中在队列分区与重复消费：桥接层重启可能造成秒级重复投递，消费侧要保证幂等（现有落库已有 <code>event_id</code> 去重，覆盖住）。暂缓项：</p>',
+    '<ul><li>镜像会话调度 / 轮换——等双写稳定后再议；</li><li>在线巡检 / 换镜像全量巡检——不在本次范围；</li><li>跨平台任务转移——语义未定，先拒收。</li></ul>',
+    '<p>以上为讨论稿口径，数字以压测复核为准；定稿后按步骤拆任务下发。</p>'
+  ].join("\n");
+
+  var DOC_PLAIN = [
+    '<p>这份文档刻意不带任何标题层级，用来验证空大纲兜底：没有可收集的 heading 时，大纲面板与顶栏开关都不渲染，布局回到单栏满宽，与现状完全一致。</p>',
+    '<p>周三上午与运维对齐桥接层的发布窗口，需要带上压测报告和回滚预案。发布窗口初定周四凌晨 1:00–3:00，避开定时任务高峰；窗口内需要封网，期间 <code>queue-bridge</code> 的配置变更全部冻结。</p>',
+    '<p>对账脚本的输出格式再确认一次：两侧计数按小时分桶，偏差列保留两位小数，超阈值行标红。报告会自动落到共享盘的对账目录，文件名带日期，不用人工改名。</p>',
+    '<ul><li>带压测报告（共享盘 latest 版）；</li><li>带回滚预案一页纸；</li><li>确认周四封网公告已发。</li></ul>',
+    '<p>另外记录：测试环境 <code>device</code> 字段的拒收打点已经能看到流量，说明提交方在灰度环境已经在传非法值，实施前要发一轮接口提醒。</p>'
+  ].join("\n");
+
+  /* ---------- 状态（语义与 App.tsx 左栏一致） ---------- */
+  var COLLAPSE_BELOW = 1080;
+  var EXPAND_ABOVE = 1120;
+  var state = {
+    dark: false,
+    doc: "long",
+    collapsed: false,     // 当前可见态（手动与自动合并）
+    autoCollapsed: false, // 本次收起是否「自动」（只有它允许自动恢复）
+    width: 1120,
+  };
+
+  var frame = document.getElementById("frame");
+  var mdBody = document.getElementById("md-body");
+  var mdCard = document.getElementById("fp-md-card");
+  var outline = document.getElementById("fp-outline");
+  var outlineList = document.getElementById("fp-outline-list");
+  var toggleBtn = document.getElementById("outline-toggle");
+  var range = document.getElementById("width-range");
+  var readout = document.getElementById("width-readout");
+
+  /* ---------- 大纲构建：收集 heading → 赋 id → 建条目 ---------- */
+  function buildOutline() {
+    outlineList.innerHTML = "";
+    var headings = mdBody.querySelectorAll("h1,h2,h3,h4,h5,h6");
+    var minLevel = 6;
+    headings.forEach(function (h) { minLevel = Math.min(minLevel, +h.tagName.slice(1)); });
+    headings.forEach(function (h, i) {
+      h.id = "fp-h-" + i;
+      var level = +h.tagName.slice(1);
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "fp-outline-item";
+      btn.textContent = h.textContent;
+      btn.title = h.textContent; // 深缩进 + 省略号后唯一可达的全文入口
+      btn.style.paddingLeft = 10 + Math.min(level - minLevel, 4) * 14 + "px";
+      btn.addEventListener("click", function () { jumpTo(h); });
+      outlineList.appendChild(btn);
+    });
+    var has = headings.length > 0;
+    outline.hidden = !has;
+    toggleBtn.hidden = !has;
+    updateActive(true);
+  }
+
+  function jumpTo(h) {
+    var rect = h.getBoundingClientRect();
+    var cardRect = mdCard.getBoundingClientRect();
+    mdCard.scrollTo({ top: mdCard.scrollTop + rect.top - cardRect.top - 44, behavior: "smooth" });
+  }
+
+  /* ---------- scrollspy：rAF 节流，实时 rect（不缓存 offsetTop） ---------- */
+  var spyTick = false;
+  mdCard.addEventListener("scroll", function () {
+    if (!spyTick) {
+      spyTick = true;
+      requestAnimationFrame(function () { spyTick = false; updateActive(false); });
+    }
+  });
+
+  function updateActive(force) {
+    if (outline.hidden || state.collapsed) return; // 折叠态白算，省全量 rect 查询
+    var headings = mdBody.querySelectorAll("h1,h2,h3,h4,h5,h6");
+    if (!headings.length) return;
+    var cardRect = mdCard.getBoundingClientRect();
+    var line = cardRect.top + 96;
+    var activeIdx = 0;
+    for (var i = 0; i < headings.length; i++) {
+      if (headings[i].getBoundingClientRect().top <= line) activeIdx = i;
+    }
+    // 底部钳制：滚到底时最后几节可能永远够不着参考线，强制点亮最后一项
+    if (mdCard.scrollTop + mdCard.clientHeight >= mdCard.scrollHeight - 1) activeIdx = headings.length - 1;
+    var items = outlineList.children;
+    var changed = !items[activeIdx] || !items[activeIdx].classList.contains("active");
+    for (var j = 0; j < items.length; j++) {
+      items[j].classList.toggle("active", j === activeIdx);
+      if (j === activeIdx) items[j].setAttribute("aria-current", "location");
+      else items[j].removeAttribute("aria-current");
+    }
+    if (changed || force) {
+      var el = items[activeIdx];
+      if (el) outlineList.scrollTop = el.offsetTop - outlineList.clientHeight / 2 + el.offsetHeight / 2;
+    }
+  }
+
+  /* ---------- 手动开关（清自动标记，照左栏语义） ---------- */
+  toggleBtn.addEventListener("click", function () {
+    state.collapsed = !state.collapsed;
+    state.autoCollapsed = false;
+    applyCollapsed();
+    updateReadout();
+  });
+
+  function applyCollapsed() {
+    outline.classList.toggle("collapsed", state.collapsed);
+    toggleBtn.classList.toggle("on", !state.collapsed);
+    toggleBtn.setAttribute("aria-pressed", String(!state.collapsed));
+    // 折叠/展开完成后正文宽度变了（可能触发 reflow 而无滚动事件），补一次 active 重估
+    setTimeout(function () { updateActive(true); }, 260);
+  }
+
+  /* ---------- 宽度自适应：迟滞带 + 只恢复自动收起 ---------- */
+  function applyAuto(w) {
+    if (outline.hidden) return;
+    if (w < COLLAPSE_BELOW && !state.collapsed) {
+      state.autoCollapsed = true;
+      state.collapsed = true;
+      applyCollapsed();
+    } else if (w > EXPAND_ABOVE && state.collapsed && state.autoCollapsed) {
+      state.autoCollapsed = false;
+      state.collapsed = false;
+      applyCollapsed();
+    }
+  }
+
+  function setWidth(w) {
+    state.width = w;
+    frame.style.width = w + "px";
+    range.value = w;
+    applyAuto(w);
+    updateReadout();
+  }
+
+  function updateReadout() {
+    var st;
+    if (outline.hidden) st = "文档无标题 · 无大纲";
+    else if (state.collapsed && state.autoCollapsed) st = "已自动折叠（<1080 折叠 / >1120 恢复）";
+    else if (state.collapsed) st = "已手动折叠（拉宽不自动开）";
+    else st = "大纲显示中";
+    readout.textContent = state.width + " px · " + st;
+  }
+
+  range.addEventListener("input", function () { setWidth(+range.value); });
+
+  /* ---------- 拖窄→拉宽演示（自动走一遍迟滞带） ---------- */
+  function animateWidth(from, to, dur, done) {
+    var t0 = null;
+    function step(t) {
+      if (t0 === null) t0 = t;
+      var k = Math.min((t - t0) / dur, 1);
+      var e = 1 - Math.pow(1 - k, 3);
+      setWidth(Math.round(from + (to - from) * e));
+      if (k < 1) requestAnimationFrame(step);
+      else if (done) done();
+    }
+    requestAnimationFrame(step);
+  }
+
+  document.getElementById("chip-drag").addEventListener("click", function () {
+    if (this.dataset.busy) return;
+    this.dataset.busy = "1";
+    var self = this;
+    // 后台标签页 rAF 停发会让动画永不完结，超时兜底解锁
+    var guard = setTimeout(function () { delete self.dataset.busy; }, 5000);
+    setWidth(1280);
+    animateWidth(1280, 950, 900, function () {
+      setTimeout(function () {
+        animateWidth(950, 1300, 900, function () { clearTimeout(guard); delete self.dataset.busy; });
+      }, 700);
+    });
+  });
+
+  /* ---------- 文档切换 ---------- */
+  var chipLong = document.getElementById("chip-long");
+  var chipPlain = document.getElementById("chip-plain");
+  function loadDoc(key) {
+    state.doc = key;
+    mdBody.innerHTML = key === "long" ? DOC_LONG : DOC_PLAIN;
+    mdCard.scrollTop = 0;
+    chipLong.classList.toggle("on", key === "long");
+    chipPlain.classList.toggle("on", key === "plain");
+    buildOutline();
+    // 换文档后按当前宽度重估折叠态：hidden 期间 applyAuto 不跑，会留过期折叠态
+    // （如 1000 宽自动折叠 → 切无标题文档 → 拉宽 1300 → 切回，不重估就 1300 还折叠）
+    applyAuto(state.width);
+    updateReadout();
+  }
+  chipLong.addEventListener("click", function () { loadDoc("long"); });
+  chipPlain.addEventListener("click", function () { loadDoc("plain"); });
+
+  /* ---------- 主题切换（app 自带浅/深两套 tokens） ---------- */
+  var themeBtn = document.getElementById("theme-btn");
+  function setTheme(dark) {
+    state.dark = dark;
+    frame.setAttribute("data-theme", dark ? "dark" : "light");
+    themeBtn.innerHTML = (dark ? ICONS.sun(12) : ICONS.moon(12)) + " " + (dark ? "深色" : "浅色");
+  }
+  themeBtn.addEventListener("click", function () {
+    setTheme(!state.dark);
+  });
+
+  /* ---------- 初始化 ---------- */
+  document.querySelectorAll("[data-icon]").forEach(function (el) {
+    var factory = ICONS[el.getAttribute("data-icon")] || function () { return ""; };
+    el.innerHTML = factory(parseInt(el.getAttribute("data-size") || "13", 10));
+  });
+  toggleBtn.innerHTML = ICONS.panel(15);
+  setTheme(false);
+  applyCollapsed();
+  setWidth(1120);
+  loadDoc("long");
+})();
+</script>

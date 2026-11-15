@@ -3879,6 +3879,15 @@ html.ctrl-links .md-body a {
   padding: 0 12px 0 10px;
 }
 
+/* 大纲开关的「开着」态：实心 accent 底（.icon-btn-on 同口径），给 aria-pressed 配视觉态 */
+.fp-btn.on {
+  background: var(--accent);
+}
+
+.fp-btn.on:hover {
+  background: var(--accent-hover);
+}
+
 /* 内容区：md = 面板卡（.md-body 的全局样式直接生效），html = 白底 iframe 卡。
    遮罩空白（stage 与卡片之间）mousedown 同样可关——FilePreviewOverlay 的
    target === currentTarget 判定覆盖 overlay 与 stage 两层 */
@@ -3899,9 +3908,10 @@ html.ctrl-links .md-body a {
 }
 
 .fp-md-card {
-  /* 面板铺满 stage（与 .fp-html-card 同款最大化处理），正文列在卡内收成可读
-     版心居中——prose 拉满没法读，满宽的是「面板」不是文本 */
-  width: 100%;
+  /* 占满 .fp-md-layout 里除大纲外的剩余空间（与 .fp-html-card 同款最大化处理），
+     正文列在卡内收成可读版心居中——prose 拉满没法读，满宽的是「面板」不是文本 */
+  flex: 1;
+  min-width: 0;
   background: var(--panel);
   border-radius: 12px;
   box-shadow: var(--shadow);
@@ -3931,6 +3941,89 @@ html.ctrl-links .md-body a {
   flex: 1;
   border: none;
   background: #fff;
+}
+
+/* ---- md 态左侧大纲（Typora 式双栏）：与正文卡同 surface，折叠走「抽屉」模式 ----
+   外层 width/margin 收 0 + 裁切 + visibility 收尾，内层定宽不重排；单文档重折行
+   成本可接受（与会话左栏禁 basis 动画的数百消息+终端场景不同）。visibility 双向
+   非对称：展开立即可见（0s delay），收起等动画播完再隐藏——否则展开动画全程
+   不可见、收起后残留条目仍可 Tab 聚焦 */
+.fp-md-layout {
+  display: flex;
+  align-items: stretch;
+  width: 100%;
+  min-width: 0;
+}
+
+.fp-outline {
+  flex: 0 0 auto;
+  width: 360px; /* 与左栏项目列表同宽（对齐观感） */
+  margin-right: 12px;
+  background: var(--panel);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  opacity: 1;
+  visibility: visible;
+  transition:
+    width var(--dur-slow) var(--ease-emph),
+    margin-right var(--dur-slow) var(--ease-emph),
+    opacity var(--dur-slow) var(--ease-emph),
+    visibility 0s;
+}
+
+.fp-outline.collapsed {
+  width: 0;
+  margin-right: 0;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    width var(--dur-slow) var(--ease-emph),
+    margin-right var(--dur-slow) var(--ease-emph),
+    opacity var(--dur-slow) var(--ease-emph),
+    visibility 0s var(--dur-slow);
+}
+
+.fp-outline-inner {
+  /* position:relative 是条目 offsetTop 的参照系（active 项居中跟随按它算）；
+     定宽 = 外层折叠宽度，折叠时内层不重排 */
+  position: relative;
+  width: 360px;
+  height: 100%;
+  overflow-y: auto;
+  padding: 10px 8px;
+}
+
+.fp-outline-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 5px 10px;
+  border: none;
+  border-radius: 7px;
+  background: none;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  transition: background var(--dur-fast), color var(--dur-fast);
+}
+
+.fp-outline-item:hover {
+  background: var(--panel-2);
+  color: var(--text);
+}
+
+/* active 字色用 --accent-hover 而非 --accent：12px 加粗在 --accent-soft 叠底上
+   accent 只有 ~3.6:1（双主题都不达 AA），accent-hover 4.78/4.54 过线（.icon-btn-on 同口径） */
+.fp-outline-item.active {
+  background: var(--accent-soft);
+  color: var(--accent-hover);
+  font-weight: 600;
 }
 
 
