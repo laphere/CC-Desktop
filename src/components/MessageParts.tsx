@@ -7,6 +7,11 @@ import { marked } from "marked";
 import DOMPurify from "dompurify";
 import { installMarkdownExtensions } from "../lib/highlight";
 import { decorateCodeBlocks, installCodeCopy } from "../lib/code-copy";
+import {
+  highlightKeyword,
+  highlightTextHtml,
+  normalizeKeyword,
+} from "../lib/keyword-highlight";
 import { installCtrlLinkOpen, linkifyHtml } from "../lib/links";
 import { materializeListMarkers } from "../lib/list-markers";
 import type { ContentBlock } from "../types";
@@ -103,20 +108,25 @@ export function UserMsgCopyButton({ text }: { text: string }) {
  *  中文标点进 href 的坑，详见 lib/links.ts 头部；代码块复制按钮（decorateCodeBlocks）
  *  把每个 `<pre>` 包进 .md-code 并前置按钮，点击经 installCodeCopy 的委托复制代码
  *  原文，详见 lib/code-copy.ts 头部。 */
-export function MarkdownText({ text }: { text: string }) {
+export function MarkdownText({ text, highlight }: { text: string; highlight?: string }) {
   const html = useMemo(() => {
     try {
-      return decorateCodeBlocks(
+      const base = decorateCodeBlocks(
         linkifyHtml(
           materializeListMarkers(
             DOMPurify.sanitize(marked.parse(text, { async: false }) as string),
           ),
         ),
       );
+      // 搜索态关键词高亮：仅在有关键词时启用，空串/不传 = 原样输出。
+      // 先用原文快速门挡掉不含词的消息——流式输出每帧都重算，省掉大 HTML 的解析
+      if (!highlight) return base;
+      if (!text.toLowerCase().includes(normalizeKeyword(highlight))) return base;
+      return highlightTextHtml(base, highlight);
     } catch {
       return text;
     }
-  }, [text]);
+  }, [text, highlight]);
   return <div className="md-body" dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
@@ -233,7 +243,7 @@ function enrichDiffOps(ops: DiffOp[]): DiffLine[] {
 // ---- 渲染 ----
 
 /** Claude Code 风格 diff 行（行号 + -/ + 前缀 + 内容） */
-function DiffLineRow({ line }: { line: DiffLine }) {
+function DiffLineRow({ line, highlight }: { line: DiffLine; highlight?: string }) {
   const cls = line.op === "delete" ? "diff-del" : line.op === "insert" ? "diff-add" : "";
   const prefix = line.op === "delete" ? "-" : line.op === "insert" ? "+" : " ";
   const lineNum = line.oldLine ?? line.newLine ?? null;
@@ -241,7 +251,7 @@ function DiffLineRow({ line }: { line: DiffLine }) {
     <div className={`diff-line ${cls}`}>
       <span className="diff-ln">{lineNum ?? ""}</span>
       <span className="diff-prefix">{prefix}</span>
-      <span className="diff-text">{line.text || " "}</span>
+      <span className="diff-text">{highlightKeyword(line.text || " ", highlight)}</span>
     </div>
   );
 }
@@ -255,18 +265,30 @@ function editSummary(oldCount: number, newCount: number): string {
 }
 
 /** 代码变更卡片内的错误输出（工具执行出错时显示在 diff 末尾） */
-function ToolErrorOutput({ resultBlock }: { resultBlock?: ContentBlock | null }) {
+function ToolErrorOutput({
+  resultBlock,
+  highlight,
+}: {
+  resultBlock?: ContentBlock | null;
+  highlight?: string;
+}) {
   if (!resultBlock?.isError || !resultBlock.text) return null;
-  return <pre className="tool-body tool-result-error">{resultBlock.text.slice(0, 4000)}</pre>;
+  return (
+    <pre className="tool-body tool-result-error">
+      {highlightKeyword(resultBlock.text.slice(0, 4000), highlight)}
+    </pre>
+  );
 }
 
 /** 代码变更卡片：Claude Code 风格（resultBlock 出错时在 diff 末尾附错误输出） */
 export function CodeChangeCard({
   block,
   resultBlock,
+  highlight,
 }: {
   block: ContentBlock;
   resultBlock?: ContentBlock | null;
+  highlight?: string;
 }) {
   const name = block.name ?? "";
   const input = (block.input ?? {}) as Record<string, unknown>;
@@ -283,18 +305,18 @@ export function CodeChangeCard({
           <span className="diff-icon">
             <FileDiffIcon size={12} />
           </span>
-          <span className="diff-title">Edit</span>
-          <span className="diff-path">{filePath}</span>
+          <span className="diff-title">{highlightKeyword("Edit", highlight)}</span>
+          <span className="diff-path">{highlightKeyword(filePath, highlight)}</span>
         </summary>
         <div className="diff-summary-sub">
           {editSummary(oldLines.length, newLines.length)}
         </div>
         <div className="diff-body">
           {diffLines.map((dl, i) => (
-            <DiffLineRow key={i} line={dl} />
+            <DiffLineRow key={i} line={dl} highlight={highlight} />
           ))}
         </div>
-        <ToolErrorOutput resultBlock={resultBlock} />
+        <ToolErrorOutput resultBlock={resultBlock} highlight={highlight} />
       </details>
     );
   }
@@ -307,8 +329,8 @@ export function CodeChangeCard({
           <span className="diff-icon">
             <FileDiffIcon size={12} />
           </span>
-          <span className="diff-title">Write</span>
-          <span className="diff-path">{filePath}</span>
+          <span className="diff-title">{highlightKeyword("Write", highlight)}</span>
+          <span className="diff-path">{highlightKeyword(filePath, highlight)}</span>
         </summary>
         <div className="diff-summary-sub">
           Added {content.length} line{content.length > 1 ? "s" : ""}
@@ -318,10 +340,11 @@ export function CodeChangeCard({
             <DiffLineRow
               key={i}
               line={{ op: "insert", text: line, oldLine: null, newLine: i + 1 }}
+              highlight={highlight}
             />
           ))}
         </div>
-        <ToolErrorOutput resultBlock={resultBlock} />
+        <ToolErrorOutput resultBlock={resultBlock} highlight={highlight} />
       </details>
     );
   }
@@ -334,8 +357,8 @@ export function CodeChangeCard({
           <span className="diff-icon">
             <FileDiffIcon size={12} />
           </span>
-          <span className="diff-title">MultiEdit</span>
-          <span className="diff-path">{filePath}</span>
+          <span className="diff-title">{highlightKeyword("MultiEdit", highlight)}</span>
+          <span className="diff-path">{highlightKeyword(filePath, highlight)}</span>
         </summary>
         <div className="diff-summary-sub">
           {edits.length} edit{edits.length !== 1 ? "s" : ""}
@@ -355,7 +378,7 @@ export function CodeChangeCard({
                   </span>
                 </div>
                 {diffLines.map((dl, j) => (
-                  <DiffLineRow key={j} line={dl} />
+                  <DiffLineRow key={j} line={dl} highlight={highlight} />
                 ))}
               </div>
             );
@@ -364,7 +387,7 @@ export function CodeChangeCard({
             <div className="diff-empty">No edits</div>
           )}
         </div>
-        <ToolErrorOutput resultBlock={resultBlock} />
+        <ToolErrorOutput resultBlock={resultBlock} highlight={highlight} />
       </details>
     );
   }
@@ -379,15 +402,17 @@ export function ToolUseRow({
   hasResult,
   isError,
   resultBlock,
+  highlight,
 }: {
   block: ContentBlock;
   hasResult: boolean;
   isError: boolean;
   resultBlock?: ContentBlock | null;
+  highlight?: string;
 }) {
   const name = block.name ?? "工具";
   if (name === "Edit" || name === "Write" || name === "MultiEdit") {
-    return <CodeChangeCard block={block} resultBlock={resultBlock} />;
+    return <CodeChangeCard block={block} resultBlock={resultBlock} highlight={highlight} />;
   }
   return (
     <details className="tool-row" open={false}>
@@ -395,17 +420,23 @@ export function ToolUseRow({
         <span className="tool-icon">
           <WrenchIcon size={12} />
         </span>
-        <span className="tool-name">{toolSummary(name, block.input)}</span>
+        <span className="tool-name">{highlightKeyword(toolSummary(name, block.input), highlight)}</span>
         <span className={`tool-status ${isError ? "tool-error" : ""}`}>
           {isError ? "• 出错" : hasResult ? "• done" : ""}
         </span>
       </summary>
       <pre className="tool-body">
-        {block.input ? JSON.stringify(block.input, null, 2).slice(0, 4000) : "（无输入）"}
+        {highlightKeyword(
+          block.input ? JSON.stringify(block.input, null, 2).slice(0, 4000) : "（无输入）",
+          highlight,
+        )}
       </pre>
       {resultBlock && (
         <pre className={`tool-body ${isError ? "tool-result-error" : "tool-result-ok"}`}>
-          {`── 执行结果 ──\n` + (resultBlock.text ?? "").slice(0, 4000)}
+          {highlightKeyword(
+            `── 执行结果 ──\n` + (resultBlock.text ?? "").slice(0, 4000),
+            highlight,
+          )}
         </pre>
       )}
     </details>
@@ -416,9 +447,11 @@ export function ToolUseRow({
 export function ToolResultCard({
   block,
   toolName,
+  highlight,
 }: {
   block: ContentBlock;
   toolName: string | null;
+  highlight?: string;
 }) {
   return (
     <details className="tool-result" open={false}>
@@ -430,7 +463,9 @@ export function ToolResultCard({
           {block.isError ? "工具执行出错" : `${toolName ?? "工具"} 结果`}
         </span>
       </summary>
-      <pre className="tool-body">{(block.text ?? "").slice(0, 4000)}</pre>
+      <pre className="tool-body">
+        {highlightKeyword((block.text ?? "").slice(0, 4000), highlight)}
+      </pre>
     </details>
   );
 }
@@ -476,16 +511,24 @@ export function FindingsCard({
   hasResult,
   isError,
   resultBlock,
+  highlight,
 }: {
   block: ContentBlock;
   hasResult: boolean;
   isError: boolean;
   resultBlock?: ContentBlock | null;
+  highlight?: string;
 }) {
   const findings = parseFindings(block.input);
   if (findings.length === 0) {
     return (
-      <ToolUseRow block={block} hasResult={hasResult} isError={isError} resultBlock={resultBlock} />
+      <ToolUseRow
+        block={block}
+        hasResult={hasResult}
+        isError={isError}
+        resultBlock={resultBlock}
+        highlight={highlight}
+      />
     );
   }
   const confirmed = findings.filter((f) => (f.verdict ?? "").toUpperCase() === "CONFIRMED").length;
@@ -513,18 +556,22 @@ export function FindingsCard({
           return (
             <div className="finding" key={i}>
               <div className="finding-title">
-                {i + 1}. {title}
+                {i + 1}. {highlightKeyword(title, highlight)}
               </div>
               <div className="finding-meta">
                 <span className={v.cls}>{v.label}</span>
-                {f.category ? ` · ${f.category}` : ""}
-                {f.file ? ` · ${f.file}${f.line != null ? `:${f.line}` : ""}` : ""}
+                {f.category ? ` · ${highlightKeyword(f.category, highlight)}` : ""}
+                {f.file
+                  ? ` · ${highlightKeyword(`${f.file}${f.line != null ? `:${f.line}` : ""}`, highlight)}`
+                  : ""}
               </div>
               {f.summary && f.summary !== title && (
-                <div className="finding-summary">{f.summary}</div>
+                <div className="finding-summary">{highlightKeyword(f.summary, highlight)}</div>
               )}
               {f.failure_scenario && (
-                <div className="finding-scenario">触发场景：{f.failure_scenario}</div>
+                <div className="finding-scenario">
+                  触发场景：{highlightKeyword(f.failure_scenario, highlight)}
+                </div>
               )}
             </div>
           );

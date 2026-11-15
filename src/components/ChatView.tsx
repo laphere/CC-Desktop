@@ -22,6 +22,7 @@ import {
 import { Channel } from "../lib/channel";
 import { api } from "../lib/api";
 import { settleStaleThinking } from "../lib/chat-items";
+import { highlightKeyword } from "../lib/keyword-highlight";
 import { viewTransition } from "../lib/view-transition";
 import { cacheHitRate, fmtHitRate } from "../lib/token-stats";
 import {
@@ -293,7 +294,15 @@ type StreamEntry =
       /** 实时区用户气泡的 item id（导航轨 data-live-user 锚点定位用） */
       liveId?: number;
     }
-  | { t: "asstText"; key: string; text: string; msgIndex?: number; streaming?: boolean }
+  | {
+      t: "asstText";
+      key: string;
+      text: string;
+      msgIndex?: number;
+      streaming?: boolean;
+      /** 搜索跳转定位用（历史消息才有）：命中的时候选中原消息里的具体文本块 */
+      wrap?: { msgIndex: number; blockIdx: number };
+    }
   | {
       t: "thinking";
       key: string;
@@ -507,6 +516,9 @@ export default function ChatView({
   const [searchResults, setSearchResults] = useState<SessionSearchHit[] | null>(null);
   const [filesOpen, setFilesOpen] = useState(false);
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  /** 搜索态关键词（已 trim；空串 = 不高亮）。渲染期直接算，避免各处重复 trim。
+   *  仅在搜索面板打开时生效——面板关掉就撤掉高亮，否则正文里一直留着 <mark> */
+  const searchKw = searchOpen ? searchKeyword.trim() : "";
 
   // ---------- 消息区划选右键「复制」 ----------
   /** 菜单是否打开（开入口在 .chat-body 的 onContextMenu，关闭路径见 bodyRef 处的 effect）。
@@ -1783,9 +1795,11 @@ export default function ChatView({
     };
   }, [session?.file, searchKeyword, onToast]);
 
-  /** 跳转到某条历史消息（全局序号）：未加载的分页先加载对应页再定位 */
+  /** 跳转到某条历史消息（全局序号）：未加载的分页先加载对应页再定位。
+   *  revealKeyword=true（搜索/文件面板跳转）时优先滚到命中块内的关键词高亮处；
+   *  导航轨不传，仍定位到消息容器 */
   const jumpTo = useCallback(
-    async (globalIndex: number, blockIndex?: number) => {
+    async (globalIndex: number, blockIndex?: number, revealKeyword = false) => {
       const body = bodyRef.current;
       if (!body) return;
       const myFile = session?.file ?? null;
@@ -1815,21 +1829,32 @@ export default function ChatView({
       const locate = () => {
         if (sessionFileRef.current !== myFile) return; // 已切换会话，不定位
         if (seq !== winSeqRef.current) return; // 已有更新的跳转接管定位
-        const el = body.querySelector(`[data-msg-index="${globalIndex}"]`);
-        if (!el) return;
-        el.scrollIntoView({ block: "start" });
-        el.classList.remove("msg-flash");
-        void (el as HTMLElement).offsetWidth;
-        el.classList.add("msg-flash");
-        if (blockIndex !== undefined) {
-          const card = body.querySelector(
-            `[data-block-idx="${globalIndex}-${blockIndex}"] details`,
-          );
-          if (card) {
-            card.setAttribute("open", "");
-            card.closest("details.activity")?.setAttribute("open", "");
-          }
+        // 目标优先级：命中块（工具行 / diff 卡 / 文本块，data-block-idx）> 消息容器
+        // （data-msg-index）。工具命中在活动组内，而活动组外层没有 data-msg-index，
+        // 只找消息容器会定位不到（或落到同消息的正文上，看不出是哪个工具）
+        const blockSel =
+          blockIndex !== undefined ? `[data-block-idx="${globalIndex}-${blockIndex}"]` : null;
+        const target =
+          (blockSel ? body.querySelector(blockSel) : null) ??
+          body.querySelector(`[data-msg-index="${globalIndex}"]`);
+        if (!target) return;
+        // 先展开折叠：命中块内部的 details（工具行 / diff 卡）与所有祖先 details
+        // （活动组）。折叠区里的元素 scrollIntoView 无效，且展开会撑开高度让滚动
+        // 位置失效，故滚动放到下一帧
+        if (target.tagName === "DETAILS") target.setAttribute("open", "");
+        target.querySelectorAll("details").forEach((d) => d.setAttribute("open", ""));
+        for (let p = target.parentElement; p; p = p.parentElement) {
+          if (p.tagName === "DETAILS") p.setAttribute("open", "");
         }
+        requestAnimationFrame(() => {
+          if (sessionFileRef.current !== myFile) return;
+          if (seq !== winSeqRef.current) return;
+          const mark = revealKeyword ? target.querySelector("mark") : null;
+          (mark ?? target).scrollIntoView({ block: mark ? "center" : "start" });
+          target.classList.remove("msg-flash");
+          void (target as HTMLElement).offsetWidth;
+          target.classList.add("msg-flash");
+        });
       };
       if (needFrame) requestAnimationFrame(locate);
       else locate();
@@ -2161,7 +2186,13 @@ export default function ChatView({
       for (let bi = 0; bi < m.blocks.length; bi++) {
         const b = m.blocks[bi];
         if (b.kind === "text" && b.text) {
-          entries.push({ t: "asstText", key: `h${msgIndex}-t${bi}`, text: b.text, msgIndex });
+          entries.push({
+            t: "asstText",
+            key: `h${msgIndex}-t${bi}`,
+            text: b.text,
+            msgIndex,
+            wrap: { msgIndex, blockIdx: bi },
+          });
         } else if (b.kind === "thinking" && b.text) {
           entries.push({
             t: "thinking",
@@ -2425,7 +2456,7 @@ export default function ChatView({
   /**
    * 统一渲染：活动组跨消息合并——连续的思考/工具/孤儿结果条目折进同一个
    * 可展开组，遇到用户气泡或助手文本即收口（与终端 Ctrl+O 行为一致）。
-   * data-msg-index（文本/用户气泡）与 data-block-idx（工具行）供搜索/文件跳转。
+   * data-msg-index（文本/用户气泡）与 data-block-idx（工具行 / 文本块）供搜索/文件跳转。
    */
   const renderStream = () => {
     const nodes: ReactNode[] = [];
@@ -2491,6 +2522,7 @@ export default function ChatView({
                       hasResult={e.hasResult}
                       isError={e.isError}
                       resultBlock={e.resultBlock}
+                      highlight={searchKw || undefined}
                     />
                   </div>
                 );
@@ -2500,6 +2532,7 @@ export default function ChatView({
                   key={e.key}
                   block={e.block}
                   toolName={e.block.toolUseId ? toolNameOf(e.block.toolUseId) : null}
+                  highlight={searchKw || undefined}
                 />
               );
             })}
@@ -2540,7 +2573,7 @@ export default function ChatView({
             )}
             {e.text && (
               <div className="chat-user-text" style={{ whiteSpace: "pre-wrap" }}>
-                {e.text}
+                {highlightKeyword(e.text, searchKw || undefined)}
               </div>
             )}
             {(timeLabel || e.text) && (
@@ -2554,8 +2587,13 @@ export default function ChatView({
       } else if (e.t === "asstText") {
         flush();
         nodes.push(
-          <div key={e.key} className="chat-msg chat-msg-assistant" data-msg-index={e.msgIndex}>
-            <MarkdownText text={e.text} />
+          <div
+            key={e.key}
+            className="chat-msg chat-msg-assistant"
+            data-msg-index={e.msgIndex}
+            data-block-idx={e.wrap ? `${e.wrap.msgIndex}-${e.wrap.blockIdx}` : undefined}
+          >
+            <MarkdownText text={e.text} highlight={searchKw || undefined} />
             {e.streaming && <span className="chat-cursor" />}
           </div>,
         );
@@ -2579,6 +2617,7 @@ export default function ChatView({
               hasResult={e.hasResult}
               isError={e.isError}
               resultBlock={e.resultBlock}
+              highlight={searchKw || undefined}
             />
           </div>,
         );
@@ -2731,13 +2770,15 @@ export default function ChatView({
                 <button
                   key={i}
                   className="search-hit"
-                  onClick={() => void jumpTo(h.index, h.blockIndex)}
+                  onClick={() => void jumpTo(h.index, h.blockIndex, true)}
                   title="点击跳转到对应消息"
                 >
                   <span className={`search-kind ${h.kind === "user" ? "" : "sk-claude"}`}>
                     {h.kind === "user" ? "用户" : "Claude"}
                   </span>
-                  <span className="search-snippet">{h.snippet}</span>
+                  <span className="search-snippet">
+                    {highlightKeyword(h.snippet, searchKw || undefined)}
+                  </span>
                 </button>
               ))}
               {searchResults.length > 50 && (
@@ -2900,7 +2941,7 @@ export default function ChatView({
                             : `${f.path}（实时消息，暂不可定位）`
                         }
                         disabled={f.msgIdx === null}
-                        onClick={() => f.msgIdx !== null && void jumpTo(f.msgIdx, f.blockIdx)}
+                        onClick={() => f.msgIdx !== null && void jumpTo(f.msgIdx, f.blockIdx, true)}
                       >
                         <span className="file-name">{f.file}</span>
                         {f.count > 1 && <span className="file-count">{f.count}</span>}

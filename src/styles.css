@@ -1213,12 +1213,16 @@ mark {
   color: #1f1e1b;
 }
 
+/* 闪烁定位：底色 + 描边双通道。工具行 / diff 卡自带不透明底色，单靠背景闪在
+   它们身上看不见，故描边一并动画（outline 不占布局） */
 @keyframes msg-flash-kf {
   0% {
     background: var(--accent-soft);
+    outline: 2px solid var(--accent);
   }
   100% {
     background: transparent;
+    outline: 2px solid transparent;
   }
 }
 

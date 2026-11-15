@@ -132,7 +132,7 @@ function makeSnippet(text: string, hit: number, kw: string, radius: number): str
  * 有意取舍：正文 haystack（searchSessionMessages 的扫描）不随之折叠——折叠正文
  * 会让 indexOf 下标对不上原文、makeSnippet 的码点切片错位，代价是 kw 含连续空白
  * 时对含同款连续空白的正文不再命中。
- * ⚠️ 前端高亮（src/components/SessionRow.tsx highlightKeyword）必须与本函数逐字
+ * ⚠️ 前端高亮（src/lib/keyword-highlight.ts highlightKeyword）必须与本函数逐字
  * 同步，否则会「命中不亮」/错位——两边各写一份（主进程不引渲染层模块），改要同步。
  */
 function normalizeKeyword(keyword: string): string {
