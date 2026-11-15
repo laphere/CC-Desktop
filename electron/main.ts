@@ -8,6 +8,7 @@ import {
   ipcMain,
   Menu,
   nativeImage,
+  protocol,
   shell,
   Tray,
 } from "electron";
@@ -27,6 +28,12 @@ import { claudeRunUpgrade, claudeUpdateStatus } from "./backend/claude-update";
 import { PtyManager } from "./backend/pty";
 import { clipboardImagePath } from "./backend/clipboard-image";
 import { fetchModels } from "./backend/model-fetch";
+import { previewStat, readPreviewFile, resolveUserPath } from "./backend/files";
+import {
+  PREVIEW_SCHEME,
+  handlePreviewRequest,
+  registerPreviewRoots,
+} from "./backend/preview-protocol";
 import {
   addProject,
   checkClaude,
@@ -113,6 +120,17 @@ import { readCcState, writeCcState } from "./backend/ccstate";
 import type { IpcContract } from "./ipc-contract";
 
 const DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL ?? "http://127.0.0.1:1420";
+
+// ccpreview:// 的特权注册必须发生在 app ready 之前（Electron 硬性要求）：standard
+// 才有相对资源解析、secure 才不被当混合内容、supportFetchAPI + corsEnabled 让沙箱
+// 页面能 fetch 本协议、stream 供大文件/媒体。handler 本体在 whenReady 里挂
+// （protocol.handle 挂默认 session），供文件的安全边界见 backend/preview-protocol.ts
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: PREVIEW_SCHEME,
+    privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, corsEnabled: true },
+  },
+]);
 
 /** 自绘标题栏高度（DIP）：必须与 src/styles.css 的 --titlebar-h 一致（改一处要改两处） */
 const TITLEBAR_HEIGHT = 44;
@@ -644,6 +662,30 @@ function registerIpc(): void {
     }
   });
 
+  // ---------- 文件预览与打开 ----------
+  // shell.openPath 的回执口径是「成功 = 空串、失败 = 原因」——归一成 error: null | 原因
+  handle("open_file", async (p) => {
+    const target = resolveUserPath(String(p.path), p.base ? String(p.base) : undefined);
+    const err = await shell.openPath(target);
+    return { error: err === "" ? null : err };
+  });
+  // 资源管理器定位并选中：showItemInFolder 同步无回执，与 open_folder 同款「失败无声」
+  handle("reveal_file", (p) => {
+    shell.showItemInFolder(resolveUserPath(String(p.path), p.base ? String(p.base) : undefined));
+  });
+  handle("preview_stat", (p) =>
+    previewStat(String(p.path), p.base ? String(p.base) : undefined));
+  // 白名单/超限 throw → handle 包装层统一转字符串 reject，渲染层 toast 直显中文
+  handle("preview_read", (p) =>
+    readPreviewFile(String(p.path), p.base ? String(p.base) : undefined));
+  // ccpreview:// 的读盘白名单：登记「被预览文件所在目录 + 项目根」（append + 上限
+  // 16 个，超出淘汰最早），并记录当前顶层文档（handler 对它注入 storage shim）
+  handle("preview_register_roots", (p) =>
+    registerPreviewRoots(
+      String(p.docPath),
+      Array.isArray(p.roots) ? p.roots.map(String) : [],
+    ));
+
   // ---------- 使用统计 ----------
   handle("get_usage_stats", (p) =>
     getUsageStats({
@@ -872,6 +914,9 @@ if (!gotSingleInstanceLock) {
   app.whenReady().then(async () => {
     app.setAppUserModelId("com.claudefast.launcher");
     Menu.setApplicationMenu(null);
+    // 文件预览协议：iframe src 直指 ccpreview://，相对资源（css/js/图片）按目录
+    // 白名单从磁盘供（srcDoc 沙箱加载不了本地相对资源，见 backend/preview-protocol.ts）
+    protocol.handle(PREVIEW_SCHEME, (req) => handlePreviewRequest(req.url));
     await ensureProjectsMigrated();
     registerIpc();
     createWindow();

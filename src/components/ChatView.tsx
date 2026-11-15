@@ -51,7 +51,16 @@ import {
 } from "./MessageParts";
 import { isModalOpen } from "./Modal";
 import ImageLightbox from "./ImageLightbox";
+import FileContextMenu, { type FileMenuState } from "./FileContextMenu";
+import FilePreviewOverlay, { type FilePreviewState } from "./FilePreviewOverlay";
 import ModePicker from "./ModePicker";
+import {
+  emitFileMenu,
+  emitFilePreview,
+  previewablePath,
+  type FileLinkEventDetail,
+} from "../lib/file-links";
+import { PREVIEW_MAX_BYTES } from "../../electron/ipc-contract";
 import {
   ArrowDownIcon,
   ArrowUpIcon,
@@ -60,6 +69,7 @@ import {
   CollapseIcon,
   DownloadIcon,
   ExpandIcon,
+  EyeIcon,
   FileIcon,
   MessageCircleIcon,
   PlayIcon,
@@ -397,6 +407,15 @@ export default function ChatView({
   const [preview, setPreview] = useState<{ images: ChatImage[]; startIndex: number } | null>(
     null,
   );
+  /** 文件预览浮层（md/html）：chip 点击 / 菜单「预览」打开，ImageLightbox 同槽位互斥
+   *  （两个都是全屏遮罩，同开没有意义） */
+  const [filePreview, setFilePreview] = useState<FilePreviewState | null>(null);
+  /** 文件操作菜单（chip 右键 / diff 卡头 ⋯ 钮 / 变更文件抽屉右键）。path 已是解析
+   *  后的绝对路径——打开方先经 previewStat 拿 resolved，死路径在那一步 toast 掉。
+   *  开合与落点拆两个 state（对齐 .chat-copy-menu 的先例）：onClose 只翻 open，
+   *  落点不清——否则出场动画那 ~100ms 渲染的是空壳，条目瞬间消失 */
+  const [fileMenu, setFileMenu] = useState<FileMenuState | null>(null);
+  const [fileMenuOpen, setFileMenuOpen] = useState(false);
   /** 当前选中权限模式（原始字符串，"default" 归一为 manual；null = 配置读取中）。
    *  初始值 = settings.json 解析结果；session_ready 后以 CLI init 上报的实际
    *  模式为准。用户改选后显式传 flag（spawn 时）/热切换（运行中） */
@@ -625,6 +644,11 @@ export default function ChatView({
   // 会被 document 级 Esc 守卫查到，拦住**当前页**的 Esc「打断本轮」
   useEffect(() => {
     if (!active) setCopyMenuOpen(false);
+  }, [active]);
+  // 文件菜单同款防御位（切 tab 必经 mousedown、outside-close 会顺手关掉，
+  // 这里是防构造路径残留的兜底）
+  useEffect(() => {
+    if (!active) setFileMenuOpen(false);
   }, [active]);
   /** 本 ChatView 根节点：Esc 守卫查 picker// 面板时**限定在本页**——其他保活 tab
    *  （display:none）里残留的 data-open 面板不该拦住本页的 Esc（2026-09-26 code review：
@@ -2039,6 +2063,171 @@ export default function ChatView({
     return [...byPath.values()].sort((a, b) => a.path.localeCompare(b.path, "zh-Hans-CN"));
   }, [history, histOffset, items]);
 
+  // ---------- 文件预览与打开（路径 chip / diff 卡头 / 变更文件抽屉） ----------
+  /** 相对路径 → 绝对路径的候选链。模型写的相对路径不总是相对项目根：
+   *  ① base 直拼（项目内相对，最常见）；
+   *  ② 会话变更文件尾匹配——本轮/历史里 Write/Edit 真实写过的绝对路径，零猜测；
+   *  ③ 父目录直拼——多项目工作区里模型常以工作区根起笔（`geo/plans/x.md`，落在
+   *     `D:\Workspaces\geo` 的项目里直拼会得到 `geo\geo\plans\…`）；
+   *  ④ 逐段剥前缀再拼 base（嵌套工作区 `myProject/claude-fast/docs/x.md`，cap 3 段）。
+   *  全部落空 → null（调用方 toast「文件不存在或已删除」）。
+   *  ⚠️ 必须放在 changedFiles 之后声明：候选 ② 直接读它 */
+  const resolveFileTarget = useCallback(
+    async (raw: string): Promise<{ path: string; size: number } | null> => {
+      const base = projectPath || undefined;
+      const first = await api.previewStat(raw, base);
+      if (first.exists && first.isFile) return { path: first.resolved, size: first.size };
+      // ② 尾匹配：分隔符归一 + win 大小写不敏感；段边界对齐（"/" + rel），不认子串
+      const norm = raw.replace(/\\/g, "/").replace(/^\.\//, "").toLowerCase();
+      const lower = (p: string) => p.replace(/\\/g, "/").toLowerCase();
+      const hit = changedFiles.find((f) => {
+        const abs = lower(f.path);
+        return abs === norm || abs.endsWith("/" + norm);
+      });
+      if (hit) {
+        // file_path 来自模型 tool input、无绝对性契约：相对 / POSIX 风格的 file_path
+        // 不能直接当绝对路径用（主进程对无 base 的相对路径按 CWD 解析），佩上 base
+        // 走 stat 取 resolved；盘符头也统一走 stat——顺带验存在、拿 size
+        const st = await api.previewStat(hit.path, base);
+        if (st.exists && st.isFile) return { path: st.resolved, size: st.size };
+      }
+      if (!base) return null;
+      // ③ 父目录（= 多项目工作区根）
+      const trimmed = base.replace(/[\\/]+$/, "");
+      const i = Math.max(trimmed.lastIndexOf("\\"), trimmed.lastIndexOf("/"));
+      if (i > 0) {
+        const second = await api.previewStat(raw, trimmed.slice(0, i));
+        if (second.exists && second.isFile) return { path: second.resolved, size: second.size };
+      }
+      // ④ 逐段剥前缀：`a/b/docs/x.md` → `docs/x.md` → `x.md`（cap 3 段，防长链白扫）。
+      // 反向取舍：剥到后段可能撞上 base 根的同名文件（存在即命中）——排位最后 +
+      // ①②③全落空才轮到它 + 浮层展示全路径可自查，残余误判可接受，好过死链 toast
+      const segs = norm.split("/").filter(Boolean);
+      for (let k = 1; k < Math.min(segs.length, 4); k++) {
+        const cand = segs.slice(k).join("/");
+        if (!cand) break;
+        const st = await api.previewStat(cand, base);
+        if (st.exists && st.isFile) return { path: st.resolved, size: st.size };
+      }
+      return null;
+    },
+    [projectPath, changedFiles],
+  );
+
+  /** 打开文件预览浮层：候选链解析拿绝对路径（落空 toast 不进浮层）→ 登记 ccpreview
+   *  读盘白名单（文件所在目录 + 项目根，md 的相对图片同样吃这份白名单）→ html 直接
+   *  挂协议 URL（相对 css/js 可加载，storage shim 由主进程注入顶层文档）、md 走
+   *  previewRead（白名单的中文报错兜底）。html 不再过 preview_read，10MB 上限在此
+   *  预挡（PREVIEW_MAX_BYTES 单一真源，与 preview_read 双挡同常量） */
+  const openFilePreview = useCallback(
+    (raw: string) => {
+      void resolveFileTarget(raw)
+        .then((target) => {
+          if (!target) {
+            onToast("文件不存在或已删除");
+            return;
+          }
+          const kind: "md" | "html" = /\.html?$/i.test(target.path) ? "html" : "md";
+          if (target.size > PREVIEW_MAX_BYTES) {
+            const mb = Math.round(target.size / 1024 / 1024);
+            onToast(`文件约 ${mb}MB，超过预览上限 10MB，请在资源管理器中打开`);
+            return;
+          }
+          const dir = target.path.replace(/[\\/][^\\/]*$/, "");
+          const seen = new Set<string>();
+          const roots: string[] = [];
+          for (const r of [dir, projectPath]) {
+            if (!r) continue;
+            const k = r.toLowerCase();
+            if (seen.has(k)) continue;
+            seen.add(k);
+            roots.push(r);
+          }
+          void api
+            .previewRegisterRoots(target.path, roots)
+            .then(() => {
+              if (kind === "html") {
+                setFilePreview({ kind: "html", path: target.path });
+                return;
+              }
+              return api
+                .previewRead(target.path)
+                .then((r) =>
+                  setFilePreview({
+                    kind: "md",
+                    path: r.resolved,
+                    content: r.content,
+                  }),
+                )
+                .catch((e) => onToast(e instanceof Error ? e.message : String(e)));
+            })
+            .catch((e) => onToast(e instanceof Error ? e.message : String(e)));
+        })
+        .catch((e) => onToast(e instanceof Error ? e.message : String(e)));
+    },
+    [resolveFileTarget, projectPath, onToast],
+  );
+
+  /** Ctrl+点击 = 系统默认程序打开（对齐外链 Ctrl 手势），同走候选链 */
+  const openFileDefault = useCallback(
+    (raw: string) => {
+      void resolveFileTarget(raw)
+        .then((target) => {
+          if (!target) {
+            onToast("文件不存在或已删除");
+            return;
+          }
+          api
+            .openFile(target.path)
+            .then((r) => {
+              if (r.error) onToast(`打开失败：${r.error}`);
+            })
+            .catch((e) => onToast(`打开失败：${e instanceof Error ? e.message : String(e)}`));
+        })
+        .catch((e) => onToast(`打开失败：${e instanceof Error ? e.message : String(e)}`));
+    },
+    [resolveFileTarget, onToast],
+  );
+
+  // chip（markdown 渲染产物，不经 React）/ diff 卡头 / 变更文件抽屉统一用 ccfile:*
+  // 事件冒泡到本组件根收口——保活的非激活 tab 里也有同名根，事件只被包含触发点的
+  // 那棵树接住，不会串台。只读页同样可用（预览不启进程、不算会话冲突）。
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    const onPreview = (e: Event) => {
+      const d = (e as CustomEvent<FileLinkEventDetail>).detail;
+      if (d?.path) openFilePreview(d.path);
+    };
+    const onOpenDefault = (e: Event) => {
+      const d = (e as CustomEvent<FileLinkEventDetail>).detail;
+      if (d?.path) openFileDefault(d.path);
+    };
+    const onMenu = (e: Event) => {
+      const d = (e as CustomEvent<FileLinkEventDetail>).detail;
+      if (!d?.path) return;
+      // 菜单按候选链解析后的绝对路径开：落空 toast（与点击预览同一口径）
+      void resolveFileTarget(d.path)
+        .then((target) => {
+          if (!target) {
+            onToast("文件不存在或已删除");
+            return;
+          }
+          setFileMenu({ path: target.path, x: d.x ?? 0, y: d.y ?? 0 });
+          setFileMenuOpen(true);
+        })
+        .catch((e) => onToast(e instanceof Error ? e.message : String(e)));
+    };
+    root.addEventListener("ccfile-preview", onPreview);
+    root.addEventListener("ccfile-open-default", onOpenDefault);
+    root.addEventListener("ccfile-menu", onMenu);
+    return () => {
+      root.removeEventListener("ccfile-preview", onPreview);
+      root.removeEventListener("ccfile-open-default", onOpenDefault);
+      root.removeEventListener("ccfile-menu", onMenu);
+    };
+  }, [openFilePreview, openFileDefault, resolveFileTarget, onToast]);
+
   const fileGroups = useMemo(() => {
     const groups = new Map<string, ChangedFile[]>();
     for (const f of changedFiles) {
@@ -2932,20 +3121,44 @@ export default function ChatView({
                       {dir}
                     </div>
                     {files.map((f) => (
-                      <button
+                      <div
                         key={f.path}
-                        className="file-item"
-                        title={
-                          f.msgIdx !== null
-                            ? `${f.path}（点击定位）`
-                            : `${f.path}（实时消息，暂不可定位）`
-                        }
-                        disabled={f.msgIdx === null}
-                        onClick={() => f.msgIdx !== null && void jumpTo(f.msgIdx, f.blockIdx, true)}
+                        className="file-row"
+                        onContextMenu={(e) => {
+                          // md/html 才接文件菜单（预览/浏览器打开/资源管理器/复制路径），
+                          // 其余扩展名维持系统默认行为；实时条目（disabled 不可点跳转）
+                          // 也能用——文件在盘上，预览不受「不可定位」限制
+                          if (!previewablePath(f.path)) return;
+                          e.preventDefault();
+                          emitFileMenu(e.currentTarget, f.path, e.clientX, e.clientY);
+                        }}
                       >
-                        <span className="file-name">{f.file}</span>
-                        {f.count > 1 && <span className="file-count">{f.count}</span>}
-                      </button>
+                        <button
+                          className="file-item"
+                          title={
+                            f.msgIdx !== null
+                              ? `${f.path}（点击定位）`
+                              : `${f.path}（实时消息，暂不可定位）`
+                          }
+                          disabled={f.msgIdx === null}
+                          onClick={() => f.msgIdx !== null && void jumpTo(f.msgIdx, f.blockIdx, true)}
+                        >
+                          <span className="file-name">{f.file}</span>
+                          {f.count > 1 && <span className="file-count">{f.count}</span>}
+                        </button>
+                        {previewablePath(f.path) && (
+                          <button
+                            className="file-preview-btn"
+                            title="预览"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              emitFilePreview(e.currentTarget, f.path);
+                            }}
+                          >
+                            <EyeIcon size={12} />
+                          </button>
+                        )}
+                      </div>
                     ))}
                   </div>
                 ))
@@ -3358,6 +3571,24 @@ export default function ChatView({
           images={preview.images}
           startIndex={preview.startIndex}
           onClose={() => setPreview(null)}
+        />
+      )}
+
+      {/* 文件操作菜单 + 文件预览浮层（路径 chip / diff 卡头 / 变更文件抽屉；只读页同样
+          可用——预览不启进程）。菜单复用 .context-menu 壳，Esc 守卫的 document 级查询
+          白拿；预览走 useModalLayer，「打断本轮」的全局 Esc 据此让路 */}
+      <FileContextMenu
+        open={fileMenuOpen}
+        menu={fileMenu}
+        onClose={() => setFileMenuOpen(false)}
+        onPreview={(p) => openFilePreview(p)}
+        onToast={onToast}
+      />
+      {filePreview && (
+        <FilePreviewOverlay
+          file={filePreview}
+          onToast={onToast}
+          onClose={() => setFilePreview(null)}
         />
       )}
     </div>

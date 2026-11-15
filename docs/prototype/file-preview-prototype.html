@@ -1,0 +1,991 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CC Desktop · 文件预览与打开（交互原型）</title>
+<style>
+/* ============ 主题变量（逐值取自 src/styles.css） ============ */
+:root {
+  --bg: #f9f8f5;
+  --panel: #ffffff;
+  --panel-2: #f1efe9;
+  --border: #e5e2da;
+  --text: #292524;
+  --muted: #635e58;
+  --dim: #8f8981;
+  --accent: #c15f3c;
+  --accent-hover: #a84e2e;
+  --accent-soft: rgba(193, 95, 60, 0.12);
+  --danger: #dc2626;
+  --danger-soft: rgba(220, 38, 38, 0.1);
+  --ok: #16a34a;
+  --ok-soft: rgba(22, 163, 74, 0.12);
+  --code-bg: #ebe7de;
+  --code-inline: var(--accent-hover);
+  /* 单色代码定稿（styles.css 2026-09-22）：代码彩色字统一 --accent-hover，注释留灰 */
+  --code: var(--accent-hover);
+  --syn-string: var(--accent-hover);
+  --syn-number: var(--accent-hover);
+  --syn-keyword: var(--accent-hover);
+  --syn-meta: var(--accent-hover);
+  --syn-comment: #78716c;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.05), 0 8px 24px rgba(0, 0, 0, 0.08);
+  --radius: 10px;
+  /* 字体栈与 settings-hub 惯例一致（app 真源是 body 直写 "Segoe UI",…，无 --font token；
+     这里保留 -apple-system 前缀是为了本评审页在 macOS 上更好看，属已知偏差非逐值照搬） */
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+  --font-mono: Consolas, "Courier New", "Microsoft YaHei UI", "Microsoft YaHei", monospace;
+  --dur-fast: 100ms;
+  --dur-med: 160ms;
+  --dur-slow: 240ms;
+  --ease-out-soft: cubic-bezier(0.25, 1, 0.5, 1);
+  --ease-in-soft: cubic-bezier(0.5, 0, 0.75, 1);
+  --ease-emph: cubic-bezier(0.2, 0, 0, 1);
+  --titlebar-h: 44px;
+  --read-width: 88%;
+}
+[data-theme="dark"] {
+  --bg: #1f1e1b;
+  --panel: #292724;
+  --panel-2: #33302b;
+  --border: #3d3a34;
+  --text: #f4f1ea;
+  --muted: #a8a29e;
+  --dim: #6f6a63;
+  --accent: #d97757;
+  --accent-hover: #e08b6d;
+  --accent-soft: rgba(217, 119, 87, 0.16);
+  --danger: #f87171;
+  --danger-soft: rgba(248, 113, 113, 0.13);
+  --ok: #4ade80;
+  --ok-soft: rgba(74, 222, 128, 0.14);
+  --code-bg: #37342d;
+  --code-inline: var(--accent-hover);
+  --code: var(--accent-hover);
+  --syn-string: var(--accent-hover);
+  --syn-number: var(--accent-hover);
+  --syn-keyword: var(--accent-hover);
+  --syn-meta: var(--accent-hover);
+  --syn-comment: #9c968d;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.45), 0 8px 24px rgba(0, 0, 0, 0.55);
+}
+
+/* ============ 基础 ============ */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+button { font-family: inherit; color: inherit; }
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+html, body { height: 100%; }
+body {
+  font-family: var(--font);
+  font-size: 13px;
+  color: var(--text);
+  background: var(--bg);
+}
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 5px; border: 2px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar-thumb:hover { background: var(--dim); border: 2px solid transparent; background-clip: content-box; }
+.ic { width: 16px; height: 16px; flex: none; }
+.ic-sm { width: 14px; height: 14px; flex: none; }
+.mono { font-family: var(--font-mono); font-size: 12px; }
+
+/* ============ 方案文档页 ============ */
+.page { max-width: 1080px; margin: 0 auto; padding: 28px 20px 40px; }
+.page-head h1 { font-size: 17px; margin-bottom: 6px; }
+.page-lead { color: var(--muted); font-size: 12.5px; line-height: 1.8; max-width: 860px; }
+.frame-note {
+  margin: 16px 0 10px;
+  padding: 7px 12px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ============ 演示帧（mock app，视觉作用域限定 #frame） ============ */
+#frame {
+  position: relative;
+  height: 600px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--bg);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+#frame .tbar {
+  flex: none;
+  height: var(--titlebar-h);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  user-select: none;
+}
+#frame .tbar-title { font-size: 13px; font-weight: 600; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+#frame .tbar-title .tab-name { color: var(--text); }
+#frame .win-btns { display: flex; gap: 6px; }
+#frame .win-btn {
+  width: 30px; height: 30px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 8px; border: 1px solid var(--border);
+  background: var(--panel); color: var(--muted);
+  cursor: default;
+}
+#frame .main { flex: 1; display: flex; min-height: 0; }
+
+/* —— 会话列（居中 88%，同 .chat-msg-assistant） —— */
+#frame .chat { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+#frame .chat-scroll { flex: 1; overflow-y: auto; padding: 18px 0 24px; }
+#frame .chat-msg-assistant {
+  max-width: var(--read-width);
+  margin: 0 auto;
+  font-size: 13px;
+  line-height: 1.75;
+  color: var(--text);
+}
+#frame .chat-msg-assistant p { margin: 6px 0; }
+#frame .chat-msg-assistant .lead { color: var(--muted); }
+
+/* 行内代码定稿：彩色字、无底（styles.css .md-body code） */
+#frame .md-body code, #frame code {
+  font-family: var(--font-mono);
+  font-size: 13.5px;
+  color: var(--code-inline);
+  background: none;
+  padding: 0;
+  border-radius: 0;
+}
+
+/* ★ 本功能的路径 chip（新设计）：可点的路径 = 点状虚线常显 + hover 实线变 accent。
+   无图标前缀——正文流里加图标太吵；虚线是「可点」的最轻暗示。
+   color:inherit 必须：<a> 的 UA 默认色（蓝紫）会压过 <code> 的继承色 */
+.md-file-link {
+  color: inherit;
+  cursor: pointer;
+  text-decoration: underline dotted var(--dim);
+  text-underline-offset: 3px;
+  transition: color var(--dur-fast);
+}
+.md-file-link:hover {
+  color: var(--accent);
+  text-decoration: underline solid var(--accent);
+}
+.md-file-link.dead { text-decoration-color: var(--danger); }
+
+/* —— diff 卡（Write 卡，样式同 .diff-card styles.css 2470） —— */
+#frame .diff-card {
+  font-size: 12.5px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  margin: 2px 0;
+  overflow: hidden;
+}
+#frame .diff-summary {
+  /* ⚠️ 共用类三条规则（baseline / 6px 10px 2px / wrap）与真源逐字一致，
+     实现时别为放菜单钮改这里——按钮用 align-self 自己居中 */
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 6px 10px 2px;
+  flex-wrap: wrap;
+}
+#frame .diff-icon { color: var(--accent); display: flex; align-items: center; flex-shrink: 0; }
+#frame .diff-title {
+  font-family: var(--font-mono); font-weight: 700; font-size: 12.5px;
+  color: var(--text); flex-shrink: 0;
+}
+#frame .diff-path {
+  font-family: var(--font-mono); font-size: 12px; color: var(--muted);
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  flex: 1;
+}
+/* ★ 卡头菜单按钮（新）：md/html 文件时出现在卡头右侧，hover 显。
+   形态与 .md-code-copy（styles.css 2136，22×22 hover 浮现 ghost 钮）同构 */
+.diff-head-menu {
+  flex-shrink: 0;
+  align-self: center; /* .diff-summary 是 baseline 对齐，按钮自己居中 */
+  width: 22px; height: 22px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: none; border-radius: 6px;
+  background: none; color: var(--dim);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--dur-fast), background var(--dur-fast), color var(--dur-fast);
+}
+.diff-summary:hover .diff-head-menu,
+.diff-head-menu[data-open="true"] { opacity: 1; }
+.diff-head-menu:hover { background: var(--panel-2); color: var(--text); }
+
+/* —— 变更文件抽屉（220px，同 viewer-files） —— */
+#frame .drawer {
+  width: 220px; flex: none;
+  border-left: 1px solid var(--border);
+  background: var(--panel); /* 同 .viewer-files（styles.css 1363） */
+  display: flex; flex-direction: column;
+  padding: 8px 0;
+}
+#frame .drawer-head {
+  /* 同 .files-head（styles.css 1384）：12px/600/--muted + 底线 */
+  padding: 9px 12px;
+  font-size: 12px; font-weight: 600; color: var(--muted);
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 6px;
+}
+#frame .file-dir {
+  font-size: 10.5px; color: var(--dim);
+  padding: 4px 12px 2px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+#frame .file-item {
+  display: flex; align-items: center; gap: 6px;
+  width: 100%;
+  background: none; border: none;
+  color: var(--text);
+  font-size: 12px;
+  text-align: left;
+  padding: 4px 12px;
+  cursor: pointer;
+}
+#frame .file-item:hover { background: var(--accent-soft); }
+#frame .file-name {
+  flex: 1; min-width: 0;
+  font-family: var(--font-mono); font-size: 11.5px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+#frame .file-count {
+  flex-shrink: 0; font-size: 10px; color: var(--muted);
+  background: var(--panel-2); border-radius: 999px; padding: 0 6px;
+}
+/* ★ 抽屉条目预览按钮（新）：md/html 条目 hover 时右侧浮现「预览」按钮。
+   与 .diff-head-menu 同构（md-code-copy 同款 ghost 钮），hover 色两处统一 */
+.file-preview-btn {
+  flex-shrink: 0;
+  width: 20px; height: 20px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: none; border-radius: 5px;
+  background: none; color: var(--dim);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--dur-fast), background var(--dur-fast), color var(--dur-fast);
+}
+.file-item:hover .file-preview-btn,
+.file-preview-btn[data-open="true"] { opacity: 1; }
+.file-preview-btn:hover { background: var(--panel-2); color: var(--text); }
+
+/* —— 右键菜单（复用 .context-menu 全套规则） —— */
+.ctx-menu {
+  position: absolute;
+  z-index: 1000;
+  min-width: 190px;
+  padding: 5px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  display: none;
+  opacity: 0;
+  transform: scale(0.97);
+  transform-origin: top left;
+  pointer-events: none;
+  transition:
+    opacity var(--dur-fast) var(--ease-in-soft),
+    transform var(--dur-fast) var(--ease-in-soft),
+    display var(--dur-fast) allow-discrete;
+}
+.ctx-menu[data-open="true"] {
+  display: block;
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+  animation: menu-in var(--dur-fast) var(--ease-out-soft);
+}
+@keyframes menu-in {
+  from { opacity: 0; transform: scale(0.97); }
+}
+.ctx-item {
+  /* 真源 .context-item 是 display:block（无图标先例）；本菜单要带图标，
+     用 flex 排（垂直居中最稳）——实现时保持这套，别回退到共用 block 类 */
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  padding: 6px 10px 8px;
+  border: none;
+  background: none;
+  color: var(--text);
+  font-size: 12.5px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.ctx-item:hover { background: var(--panel-2); }
+.ctx-item .ic-sm { color: var(--muted); }
+.ctx-sep { height: 1px; background: var(--border); margin: 4px 6px; }
+
+/* —— 预览浮层（lightbox 同款：全屏深遮罩，控件让位标题栏） —— */
+.fp-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 950;
+  background: rgba(0, 0, 0, 0.78);
+  display: none;
+}
+.fp-overlay[data-open="true"] {
+  display: block;
+  animation: overlay-in var(--dur-fast) var(--ease-out-soft);
+}
+@keyframes overlay-in { from { opacity: 0; } }
+.fp-overlay.closing { animation: overlay-out var(--dur-fast) var(--ease-in-soft) forwards; }
+@keyframes overlay-out { to { opacity: 0; } }
+
+/* 控件行：与 .lightbox-close 同款贴顶让位（titlebar 44px + 12px） */
+.fp-bar {
+  position: absolute;
+  top: calc(var(--titlebar-h) + 12px);
+  left: 16px;
+  right: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  animation: bar-in var(--dur-med) var(--ease-out-soft);
+}
+@keyframes bar-in { from { opacity: 0; transform: translateY(-6px); } }
+.fp-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 46%;
+  padding: 6px 12px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 12px;
+}
+.fp-name .fp-file { font-weight: 600; white-space: nowrap; }
+.fp-name .fp-path {
+  min-width: 0;
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  color: rgba(255, 255, 255, 0.62);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.fp-name .ic-sm { color: rgba(255, 255, 255, 0.8); }
+.fp-spacer { flex: 1; }
+.fp-btn {
+  width: 30px; height: 30px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: none; border-radius: 8px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  cursor: pointer;
+  transition: background var(--dur-fast);
+}
+.fp-btn:hover { background: rgba(255, 255, 255, 0.2); }
+.fp-btn-text {
+  width: auto;
+  padding: 0 12px 0 10px;
+  gap: 6px;
+  font-size: 12px;
+}
+.fp-btn-text .ic-sm { color: rgba(255, 255, 255, 0.8); }
+
+/* 内容区：md = 面板卡居中；html = iframe 卡居中 */
+.fp-stage {
+  position: absolute;
+  inset: calc(var(--titlebar-h) + 54px) 16px 16px;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  animation: stage-in var(--dur-med) var(--ease-out-soft);
+}
+@keyframes stage-in { from { opacity: 0; transform: scale(0.985); } }
+.fp-md-card {
+  width: 820px;
+  max-width: 100%;
+  background: var(--panel);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  padding: 26px 30px;
+  overflow-y: auto;
+  font-size: 13px;
+  line-height: 1.75;
+  color: var(--text);
+}
+.fp-md-card h1 { font-size: 17px; margin: 2px 0 10px; }
+.fp-md-card h2 { font-size: 14.5px; margin: 18px 0 6px; }
+.fp-md-card p { margin: 6px 0; color: var(--text); }
+.fp-md-card ul { margin: 6px 0 6px 20px; }
+.fp-md-card li { margin: 3px 0; }
+.fp-md-card code { font-family: var(--font-mono); font-size: 13.5px; color: var(--code-inline); background: none; }
+.fp-md-card pre {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin: 8px 0;
+  overflow-x: auto;
+  color: var(--text);
+}
+.fp-md-card .cm { color: var(--syn-comment); font-style: italic; } /* 同 .hljs-comment */
+/* 单色代码定稿：kw/str/fn/var 全部 --accent-hover（与 .hljs-* 的映射一致） */
+.fp-md-card .kw, .fp-md-card .str, .fp-md-card .fn, .fp-md-card .var { color: var(--accent-hover); }
+/* 预览卡是 --panel 底，深色下 --dim 虚线低于 3:1——卡内 chip 下划线抬到 --muted */
+.fp-md-card .md-file-link { text-decoration-color: var(--muted); }
+.fp-md-card .md-file-link:hover { text-decoration-color: var(--accent); }
+.fp-html-card {
+  width: 980px;
+  max-width: 100%;
+  background: #fff;
+  border-radius: 8px;
+  overflow: hidden;
+  display: flex;
+}
+.fp-html-card iframe { flex: 1; border: none; background: #fff; }
+.fp-badge {
+  /* 同 .lightbox-counter（styles.css 3650）的字号与字色 */
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 12px;
+}
+.fp-empty {
+  align-self: center;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 12.5px;
+}
+
+/* —— toast（原型内模拟反馈） —— */
+.fp-toast {
+  position: absolute;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  box-shadow: var(--shadow);
+  color: var(--text);
+  font-size: 12px;
+  padding: 6px 14px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-fast), transform var(--dur-fast);
+}
+.fp-toast.show { opacity: 1; transform: translateX(-50%) translateY(-4px); }
+
+/* ============ 页面级演示控件与决策卡 ============ */
+.try-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 4px; }
+.try-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color var(--dur-fast), color var(--dur-fast);
+}
+.try-chip:hover { border-color: var(--dim); color: var(--text); }
+.try-chip .ic-sm { color: var(--accent); }
+
+/* reduced-motion 一刀切（同 styles.css 131）：评审页与 app 同规矩 */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+  }
+}
+
+.decisions {
+  margin-top: 20px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 10px;
+}
+.decision {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+}
+.decision h3 { font-size: 12.5px; margin-bottom: 6px; display: flex; align-items: center; gap: 8px; }
+.decision h3 .ic-sm { color: var(--accent); }
+.decision p { color: var(--muted); font-size: 12px; line-height: 1.75; }
+.decision p code {
+  font-family: var(--font-mono); font-size: 11.5px;
+  color: var(--code-inline);
+  background: var(--code-bg);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+.footnote {
+  margin-top: 16px;
+  padding: 10px 14px;
+  border-left: 3px solid var(--accent);
+  background: var(--panel);
+  border-radius: 0 8px 8px 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.8;
+}
+.footnote code { font-family: var(--font-mono); font-size: 11.5px; color: var(--code-inline); }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="page-head">
+    <h1>文件预览与打开 —— 生成的 md/html 可预览、可菜单打开</h1>
+    <p class="page-lead">
+      会话正文里模型给出的生成文件路径（inline code / 裸文本）目前是死文本。本原型演示三件事：
+      路径变<strong>可点 chip</strong>（点击预览 / 右键菜单 / Ctrl+点击默认程序）、app 内<strong>预览浮层</strong>（md 复用会话 markdown 管线、html 用沙箱 iframe）、
+      <strong>右键菜单</strong>（浏览器打开 html / 资源管理器定位 / 复制路径）。入口覆盖三处：消息 chip、Write/Edit 卡头、变更文件抽屉。
+    </p>
+  </div>
+
+  <div class="frame-note">
+    <svg class="ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+    在下面 mock 会话里直接操作：点击虚线路径 = 预览；右键路径 = 文件菜单；Ctrl+点击 = 默认程序打开（原型里模拟）；Write 卡头与抽屉条目 hover 有菜单/预览钮；Esc 或点遮罩关闭预览。
+  </div>
+
+  <div id="frame">
+    <!-- 标题栏（mock） -->
+    <div class="tbar">
+      <div class="tbar-title">
+        <span>geo-program</span>
+        <span>›</span>
+        <span class="tab-name">适配魔云腾设备 · 会话</span>
+      </div>
+      <div class="win-btns">
+        <span class="win-btn"><svg class="ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/></svg></span>
+        <span class="win-btn"><svg class="ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="14" height="14" rx="1"/></svg></span>
+        <span class="win-btn"><svg class="ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></span>
+      </div>
+    </div>
+
+    <div class="main">
+      <!-- 会话列 -->
+      <div class="chat">
+        <div class="chat-scroll">
+          <div class="chat-msg-assistant">
+            <p>方案已按 MYADB 重写，巡检改为「在线快照 + 活动账号探测」。更新后的文件：
+              <a class="md-file-link" data-file="moyunteng-mobile-collection.packed.html" data-kind="html" data-path="D:\MyWorkspaces\geo\plans\moyunteng-mobile-collection.packed.html">D:\MyWorkspaces\geo\plans\moyunteng-mobile-collection.packed.html</a>（裸文本路径同样识别）。</p>
+            <p>原型已交付并实测通过：<code><a class="md-file-link" data-file="topbar-search-prototype.html" data-kind="html" data-path="D:\MyWorkspaces\myProject\claude-fast\docs\topbar-search-prototype.html">docs/topbar-search-prototype.html</a></code>（inline code 里的路径一样可点，自包含 HTML，双击直接浏览器即可）。</p>
+            <p>用量报告同步更新到 <code><a class="md-file-link" data-file="usage-2026.md" data-kind="md" data-path="D:\MyWorkspaces\myProject\claude-fast\docs\usage-2026.md">docs/usage-2026.md</a></code>；macOS 路径同款支持：<a class="md-file-link" data-file="report.md" data-kind="md" data-path="/Users/laphe/reports/report.md">/Users/laphe/reports/report.md</a>。</p>
+            <p class="lead">点这个看看「文件不存在」的提示：<code><a class="md-file-link dead" data-file="旧版说明.md" data-kind="md" data-path="D:\MyWorkspaces\geo\docs\旧版说明.md">docs/旧版说明.md</a></code>（已删除）。</p>
+
+            <div class="diff-card">
+              <div class="diff-summary" id="diff-head">
+                <span class="diff-icon"><svg class="ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></span>
+                <span class="diff-title">Write</span>
+                <span class="diff-path">D:\MyWorkspaces\geo\plans\api-notes.md</span>
+                <button class="diff-head-menu" id="diff-menu-btn" title="文件操作" data-open="false">
+                  <svg class="ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 变更文件抽屉 -->
+      <div class="drawer" id="drawer">
+        <div class="drawer-head"><span>变更文件 · 4</span></div>
+        <div class="file-dir">D:\MyWorkspaces\geo\plans</div>
+        <button class="file-item" data-file="api-notes.md" data-kind="md" data-path="D:\MyWorkspaces\geo\plans\api-notes.md">
+          <span class="file-name">api-notes.md</span>
+          <span class="file-count">3</span>
+          <span class="file-preview-btn" title="预览" data-open="false"><svg class="ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg></span>
+        </button>
+        <button class="file-item" data-file="moyunteng-mobile-collection.packed.html" data-kind="html" data-path="D:\MyWorkspaces\geo\plans\moyunteng-mobile-collection.packed.html">
+          <span class="file-name">moyunteng-mobile-collection.packed.html</span>
+          <span class="file-count">1</span>
+          <span class="file-preview-btn" title="预览" data-open="false"><svg class="ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg></span>
+        </button>
+        <div class="file-dir">D:\MyWorkspaces\geo\src</div>
+        <button class="file-item" data-file="utils.ts" data-kind="other" data-path="D:\MyWorkspaces\geo\src\utils.ts">
+          <span class="file-name">utils.ts</span>
+          <span class="file-count">2</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- 右键菜单（复用 .context-menu 结构；演示帧内用 absolute 定位） -->
+    <div class="ctx-menu" id="ctx-menu" data-open="false"></div>
+
+    <!-- 预览浮层 -->
+    <div class="fp-overlay" id="fp-overlay" data-open="false">
+      <div class="fp-bar">
+        <div class="fp-name">
+          <span class="fp-kind-ic" id="fp-kind-ic"></span>
+          <span class="fp-file" id="fp-file">api-notes.md</span>
+          <span class="fp-path" id="fp-path">D:\MyWorkspaces\geo\plans\api-notes.md</span>
+        </div>
+        <div class="fp-spacer"></div>
+        <span class="fp-badge" id="fp-badge" style="display:none">
+          <svg class="ic-sm" style="width:12px;height:12px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/></svg>
+          沙箱 iframe · allow-scripts
+        </span>
+        <button class="fp-btn fp-btn-text" id="fp-browser" title="用系统默认浏览器打开">
+          <svg class="ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
+          浏览器打开
+        </button>
+        <button class="fp-btn fp-btn-text" id="fp-reveal" title="在资源管理器中定位该文件">
+          <svg class="ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/><circle cx="11" cy="13" r="2"/><path d="m13.5 14.5 2 2"/></svg>
+          资源管理器
+        </button>
+        <button class="fp-btn" id="fp-close" title="关闭 (Esc)">
+          <svg class="ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <div class="fp-stage" id="fp-stage"></div>
+    </div>
+
+
+    <div class="fp-toast" id="fp-toast"></div>
+  </div>
+
+  <div class="try-row">
+    <button class="try-chip" id="try-md">
+      <svg class="ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/></svg>
+      直接打开 md 预览
+    </button>
+    <button class="try-chip" id="try-html">
+      <svg class="ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10Z"/></svg>
+      直接打开 html 预览（真 iframe）
+    </button>
+    <button class="try-chip" id="try-toast">
+      <svg class="ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+      模拟「文件不存在」提示
+    </button>
+    <button class="try-chip" id="try-theme">
+      <svg class="ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+      切换浅深主题
+    </button>
+  </div>
+
+  <div class="decisions">
+    <div class="decision">
+      <h3><svg class="ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>路径 chip：无图标前缀，点状虚线常显</h3>
+      <p>正文流里给路径加图标太吵。可点性靠「点状虚线」这个最轻暗示表达，hover 变实线 + accent 色。保持 <code>.md-body code</code> 彩色字无底的定稿不动，chip 只是叠加下划线。</p>
+    </div>
+    <div class="decision">
+      <h3><svg class="ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>手势三件套</h3>
+      <p>点击 = app 内预览（安全，首选）；右键 = 文件菜单；Ctrl+点击 = 系统默认程序打开——与现有外链 Ctrl 手势同款。title 提示「点击预览，右键更多操作」。</p>
+    </div>
+    <div class="decision">
+      <h3><svg class="ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg>菜单条目按扩展名裁剪</h3>
+      <p>「在浏览器中打开」只对 html 显示（md 的默认程序多半是编辑器，不算「浏览器」）；「在资源管理器中显示」用 <code>showItemInFolder</code> 定位并选中文件，不是打开父目录。复制绝对路径常驻。</p>
+    </div>
+    <div class="decision">
+      <h3><svg class="ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/></svg>预览浮层 = lightbox 同款</h3>
+      <p>全屏深遮罩（z 950），控件行让位自绘标题栏（<code>top: 44px + 12px</code>，WCO 系统按钮之下）；Esc / 点遮罩 / 关闭钮收起；md 与 html 两态，按扩展名分派。</p>
+    </div>
+    <div class="decision">
+      <h3><svg class="ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/></svg>md 预览复用会话 markdown 管线</h3>
+      <p>marked + DOMPurify + 同一套 md-body 样式与单色代码配色，预览观感 = 会话观感。预览内容里的路径 chip 同样可点——md 文档里引用别的文件可以级联预览。</p>
+    </div>
+    <div class="decision">
+      <h3><svg class="ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/></svg>html 预览 = 沙箱 iframe</h3>
+      <p><code>srcDoc + sandbox="allow-scripts"</code>：脚本可跑（原型可交互、可切主题），但 iframe 是 opaque origin，拿不到父窗与 IPC 桥——渲染进程安全红线不破。localStorage/sessionStorage 注入内存 shim 防脚本炸掉。引用本地相对资源的 html 不保证完整，菜单里「浏览器打开」兜底。</p>
+    </div>
+    <div class="decision">
+      <h3><svg class="ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/></svg>不存在 / 超限的兜底</h3>
+      <p>点击先 <code>preview_stat</code>：不存在 → toast「文件不存在」，不炸浮层；实现层还有扩展名白名单（md/html/htm）与 10MB 上限，白名单外路径不做 chip、点击提示不支持预览。</p>
+    </div>
+    <div class="decision">
+      <h3><svg class="ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>入口三处的形态差异</h3>
+      <p>消息 chip：点击预览 + 右键菜单；Write/Edit 卡头：路径文本可点预览，卡头右侧 hover 浮现 ⋯ 菜单钮；变更文件抽屉：条目保留「点击跳转消息」不变，右侧 hover 浮现预览钮 + 右键菜单。</p>
+    </div>
+  </div>
+
+  <div class="footnote">
+    实现约束：新按钮类只有两颗 ghost 钮——<code>.diff-head-menu</code>（22×22）与 <code>.file-preview-btn</code>（20×20），
+    形态与 <code>.md-code-copy</code> 同构（hover 浮现），两颗都须按铁律复测按钮居中定版值；其余样式复用 <code>.context-item</code> / <code>.icon-btn</code> / <code>.lightbox</code> 系。
+    图标：Eye/Copy/ExternalLink/MoreHorizontal/FileText 沿用 Icons.tsx；「浏览器打开」的 globe 与「资源管理器显示」的 folder+放大镜组合 Icons.tsx 没有，实现时新增或改用现有图标（待定）。
+    新增 IPC 四通道 <code>open_file</code> / <code>reveal_file</code> / <code>preview_stat</code> / <code>preview_read</code>（契约真源 ipc-contract.ts，四处同步）；
+    路径识别挂在 linkifyHtml 之后的 DOM walk（URL 链接优先，正则互不命中）；动画全部走 <code>--dur/--ease</code> token；共用类 .diff-summary 三条真源规则不动。
+  </div>
+</div>
+
+<script>
+/* ================= 原型数据（mock 两个预览内容） ================= */
+
+/* md 预览内容：复刻会话 markdown 观感（预览里还有一条可级联的路径 chip） */
+const MD_HTML = `
+<h1>API notes — 巡检接口</h1>
+<p>本笔记由会话生成，记录 MYADB 巡检相关接口的最终口径。<strong>在线快照</strong>用 <code>boxes + devices</code> 两路返回拼装；<strong>活动探测</strong>对 idle 设备跑 <code>account-probes</code>。</p>
+<h2>决策默认值</h2>
+<ul>
+  <li>work-agent 部署在 Windows 宿主机，开 loopback；</li>
+  <li>P0 平台：DeepSeek + 豆包，终端共享一个执行槽；</li>
+  <li>调度按 idle 设备计数、按设备串行；</li>
+  <li>全量巡检按 imageKey 分组，<code>switch_image</code> 一次、探测全部 App、再 stop。</li>
+</ul>
+<h2>调度伪码</h2>
+<pre><span class="cm">// 按 idle 设备串行；DeepSeek/豆包终端共享执行槽</span>
+<span class="kw">for</span> (<span class="kw">const</span> <span class="var">dev</span> <span class="kw">of</span> <span class="fn">pickIdleDevices</span>(<span class="var">slot</span>)) {
+  <span class="kw">await</span> <span class="fn">probe</span>(<span class="var">dev</span>, { kind: <span class="str">"activity"</span> });
+}</pre>
+<p>详细方案文档见 <a class="md-file-link" data-file="moyunteng-mobile-collection.packed.html" data-kind="html" data-path="D:\\MyWorkspaces\\geo\\plans\\moyunteng-mobile-collection.packed.html">moyunteng-mobile-collection.packed.html</a>（预览里的路径 chip 同样可点——级联预览）。</p>
+`;
+
+/* html 预览内容：一个自包含小页面（有脚本、有交互），放进真 iframe 演示沙箱行为 */
+const DEMO_PAGE_HTML = `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  body { margin:0; font-family: "Segoe UI", "Microsoft YaHei", sans-serif; background:#1f1e1b; color:#f4f1ea; }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 32px 28px; }
+  h1 { font-size: 20px; margin: 0 0 6px; color: #d97757; }
+  p { color: #a8a29e; font-size: 13px; line-height: 1.8; margin: 8px 0; }
+  .card { background:#292724; border:1px solid #3d3a34; border-radius:10px; padding:16px 18px; margin:14px 0; }
+  button { background:#d97757; color:#1f1e1b; border:none; border-radius:8px; padding:8px 16px; font-size:13px; font-weight:600; cursor:pointer; }
+  button:hover { background:#e08b6d; }
+  .count { font-size: 28px; font-weight: 700; color:#f5b544; font-variant-numeric: tabular-nums; }
+  .tag { display:inline-block; background:rgba(217,119,87,.16); color:#d97757; border-radius:999px; padding:2px 10px; font-size:11px; margin-left:8px; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>魔云腾移动端采集方案 <span class="tag">演示页</span></h1>
+    <p>这是 iframe 里真实运行的自包含页面（srcDoc + sandbox="allow-scripts"）：脚本能跑、能交互，但 iframe 是 opaque origin——碰不到父窗与 IPC 桥。</p>
+    <div class="card">
+      <p>探针执行计数（点击按钮验证脚本真的在跑）：</p>
+      <div class="count" id="n">0</div>
+      <button onclick="bump()">probe +1</button>
+    </div>
+    <p>尺寸自适应、深浅色继承 preview 浮层的白底卡片……原型评审时重点看：脚本交互、滚动、字体观感。</p>
+  </div>
+  <script>
+    let n = 0;
+    function bump() { document.getElementById('n').textContent = ++n; }
+  <\/script>
+</body>
+</html>`;
+
+/* ================= 文件注册表（mock preview_read/preview_stat） ================= */
+const FILES = {
+  "D:\\MyWorkspaces\\geo\\plans\\api-notes.md": { kind: "md", html: MD_HTML },
+  "D:\\MyWorkspaces\\geo\\plans\\moyunteng-mobile-collection.packed.html": { kind: "html" },
+  "D:\\MyWorkspaces\\myProject\\claude-fast\\docs\\topbar-search-prototype.html": { kind: "html" },
+  "D:\\MyWorkspaces\\myProject\\claude-fast\\docs\\usage-2026.md": { kind: "md", html: MD_HTML },
+  "/Users/laphe/reports/report.md": { kind: "md", html: MD_HTML },
+  "D:\\MyWorkspaces\\geo\\src\\utils.ts": { kind: "other" }, /* 白名单外：右键→预览走「不支持」分支 */
+};
+
+/* ================= 元素 ================= */
+const frame = document.getElementById("frame");
+const overlay = document.getElementById("fp-overlay");
+const stage = document.getElementById("fp-stage");
+const badge = document.getElementById("fp-badge");
+const fpFile = document.getElementById("fp-file");
+const fpPath = document.getElementById("fp-path");
+const fpKindIc = document.getElementById("fp-kind-ic");
+const fpBrowser = document.getElementById("fp-browser");
+const fpReveal = document.getElementById("fp-reveal");
+const fpClose = document.getElementById("fp-close");
+const ctxMenu = document.getElementById("ctx-menu");
+const toast = document.getElementById("fp-toast");
+
+const ICON_FILE = '<svg class="ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/></svg>';
+const ICON_GLOBE = '<svg class="ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10Z"/></svg>';
+
+let closeTimer = 0;
+
+function toastMsg(msg) {
+  toast.textContent = msg;
+  toast.classList.add("show");
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => toast.classList.remove("show"), 1800);
+}
+
+/* ================= 预览浮层 ================= */
+function openPreview(path) {
+  const meta = FILES[path];
+  if (!meta) { toastMsg("文件不存在（preview_stat → false）"); return; }
+  if (meta.kind === "other") { toastMsg("不支持预览的扩展名（白名单：md / html / htm）"); return; }
+  fpFile.textContent = path.split(/[\\/]/).pop();
+  fpPath.textContent = path;
+  fpPath.title = path;
+  fpKindIc.innerHTML = meta.kind === "html" ? ICON_GLOBE : ICON_FILE;
+  /* 「浏览器打开」仅 html：md 的默认程序多半是编辑器，不算浏览器 */
+  fpBrowser.style.display = meta.kind === "html" ? "" : "none";
+  badge.style.display = meta.kind === "html" ? "" : "none";
+  clearTimeout(closeTimer);
+  overlay.classList.remove("closing");
+  overlay.dataset.open = "true";
+  if (meta.kind === "md") {
+    stage.innerHTML = '<div class="fp-md-card">' + (meta.html ?? MD_HTML) + "</div>";
+  } else {
+    stage.innerHTML = '<div class="fp-html-card"><iframe sandbox="allow-scripts" title="html 预览"></iframe></div>';
+    stage.querySelector("iframe").srcdoc = DEMO_PAGE_HTML;
+  }
+}
+
+function closePreview() {
+  overlay.classList.add("closing");
+  clearTimeout(closeTimer);
+  closeTimer = setTimeout(() => {
+    overlay.dataset.open = "false";
+    overlay.classList.remove("closing");
+    stage.innerHTML = "";
+  }, 100); /* --dur-fast */
+}
+
+fpClose.addEventListener("click", closePreview);
+overlay.addEventListener("mousedown", (e) => {
+  if (e.target === overlay) closePreview(); /* 点遮罩（内容卡之外）关闭 */
+});
+stage.addEventListener("mousedown", (e) => {
+  if (e.target === stage) closePreview(); /* 内容卡两侧的遮罩空白同样可关 */
+});
+fpBrowser.addEventListener("click", () => toastMsg("模拟调用 open_file → shell.openPath（系统默认浏览器）"));
+fpReveal.addEventListener("click", () => toastMsg("模拟调用 reveal_file → shell.showItemInFolder（定位并选中）"));
+
+/* ================= 右键文件菜单（常驻挂载 + data-open，边缘防溢出） ================= */
+function menuItem(label, iconSvg, shortcut, onPick) {
+  const b = document.createElement("button");
+  b.className = "ctx-item";
+  b.innerHTML = iconSvg + "<span>" + label + "</span>" + (shortcut ? "<kbd>" + shortcut + "</kbd>" : "");
+  b.addEventListener("click", () => { closeMenu(); onPick(); });
+  return b;
+}
+
+const ICON_EYE = '<svg class="ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>';
+const ICON_EXT = '<svg class="ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>';
+const ICON_FOLDER = '<svg class="ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/><circle cx="11" cy="13" r="2"/><path d="m13.5 14.5 2 2"/></svg>';
+const ICON_COPY = '<svg class="ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+
+function openMenu(x, y, path, kind) {
+  ctxMenu.innerHTML = "";
+  ctxMenu.appendChild(menuItem("预览", ICON_EYE, "", () => openPreview(path)));
+  if (kind === "html") {
+    ctxMenu.appendChild(menuItem("在浏览器中打开", ICON_EXT, "", () => toastMsg("模拟调用 open_file → shell.openPath")));
+  }
+  ctxMenu.appendChild(menuItem("在资源管理器中显示", ICON_FOLDER, "", () => toastMsg("模拟调用 reveal_file → showItemInFolder")));
+  const sep = document.createElement("div");
+  sep.className = "ctx-sep";
+  ctxMenu.appendChild(sep);
+  ctxMenu.appendChild(menuItem("复制绝对路径", ICON_COPY, "", () => toastMsg("模拟调用 clipboard_write_text")));
+  ctxMenu.dataset.open = "true";
+
+  /* 帧内边缘防溢出（实现里是 fixed + 视口防溢出，ContextMenu 同款） */
+  const fr = frame.getBoundingClientRect();
+  const mw = ctxMenu.offsetWidth, mh = ctxMenu.offsetHeight;
+  ctxMenu.style.left = Math.min(x, fr.width - mw - 8) + "px";
+  ctxMenu.style.top = Math.min(y, fr.height - mh - 8) + "px";
+}
+function closeMenu() { ctxMenu.dataset.open = "false"; }
+
+/* 点空处 / Esc 关菜单。挂 document（真 app 里整窗即帧、ContextMenu 同款外点关），
+   只挂帧内的话帧外点击会残留菜单 */
+document.addEventListener("mousedown", (e) => {
+  if (!e.target.closest(".ctx-menu")) closeMenu();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  if (ctxMenu.dataset.open === "true") { closeMenu(); return; }
+  if (overlay.dataset.open === "true") closePreview();
+});
+
+/* ================= 三处入口的手势 ================= */
+/* 消息 chip：点击预览（先 stat，mock 里查注册表）、右键菜单。
+   委托到 document：md 预览卡是动态注入的，里面的级联 chip 同样要生效 */
+document.addEventListener("click", (e) => {
+  const a = e.target instanceof Element ? e.target.closest(".md-file-link") : null;
+  if (!a) return;
+  e.preventDefault();
+  if (e.ctrlKey) { toastMsg("模拟调用 open_file → shell.openPath（系统默认程序）"); return; }
+  openPreview(a.dataset.path);
+});
+document.addEventListener("contextmenu", (e) => {
+  const a = e.target instanceof Element ? e.target.closest(".md-file-link") : null;
+  if (!a) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const fr = frame.getBoundingClientRect();
+  openMenu(e.clientX - fr.left, e.clientY - fr.top, a.dataset.path, a.dataset.kind);
+});
+
+/* Write 卡头：路径文本点击预览（原型里卡头整体可点），⋯ 钮右键同款菜单 */
+const diffHead = document.getElementById("diff-head");
+const diffMenuBtn = document.getElementById("diff-menu-btn");
+const DIFF_PATH = "D:\\MyWorkspaces\\geo\\plans\\api-notes.md";
+diffHead.addEventListener("click", (e) => {
+  if (e.target.closest(".diff-head-menu")) return;
+  openPreview(DIFF_PATH);
+});
+diffHead.addEventListener("contextmenu", (e) => {
+  e.preventDefault();
+  const fr = frame.getBoundingClientRect();
+  openMenu(e.clientX - fr.left, e.clientY - fr.top, DIFF_PATH, "md");
+});
+diffMenuBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  const r = diffMenuBtn.getBoundingClientRect();
+  const fr = frame.getBoundingClientRect();
+  openMenu(r.left - fr.left, r.bottom - fr.top + 4, DIFF_PATH, "md");
+});
+
+/* 抽屉条目：点击仍是占位（实现里=跳转消息）；预览钮点击预览；右键菜单 */
+document.querySelectorAll("#drawer .file-item").forEach((item) => {
+  const path = item.dataset.path;
+  const kind = item.dataset.kind;
+  item.addEventListener("click", (e) => {
+    if (e.target.closest(".file-preview-btn")) return;
+    toastMsg(kind === "other" ? "非 md/html：保留原行为（跳转消息）" : "原行为：跳转到对应消息（原型不演示）");
+  });
+  item.querySelector(".file-preview-btn")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    openPreview(path);
+  });
+  item.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    const fr = frame.getBoundingClientRect();
+    openMenu(e.clientX - fr.left, e.clientY - fr.top, path, kind);
+  });
+});
+
+/* ================= 页面级演示按钮 ================= */
+document.getElementById("try-md").addEventListener("click", () =>
+  openPreview("D:\\MyWorkspaces\\geo\\plans\\api-notes.md"));
+document.getElementById("try-html").addEventListener("click", () =>
+  openPreview("D:\\MyWorkspaces\\geo\\plans\\moyunteng-mobile-collection.packed.html"));
+document.getElementById("try-toast").addEventListener("click", () =>
+  openPreview("D:\\MyWorkspaces\\geo\\docs\\旧版说明.md"));
+
+/* ================= 主题切换（页面级，跟随系统 + 手动） ================= */
+const media = matchMedia("(prefers-color-scheme: light)");
+function applyTheme() {
+  document.documentElement.dataset.theme = media.matches ? "light" : "dark";
+}
+media.addEventListener("change", applyTheme);
+applyTheme();
+document.getElementById("try-theme").addEventListener("click", () => {
+  document.documentElement.dataset.theme =
+    document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+});
+</script>
+</body>
+</html>

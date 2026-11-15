@@ -1469,6 +1469,55 @@ mark {
   background: var(--accent-soft);
 }
 
+/* 行容器：md/html 条目右侧挂一颗 hover 浮现的预览钮（.file-item 本体保持 width:100%
+   的原样——只有包在 .file-row 里时让位成 flex:1）。实时条目（disabled、不可点跳转）
+   预览钮照常可用：文件在盘上，预览不受「不可定位」限制 */
+.file-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.file-row .file-item {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+}
+
+.file-preview-btn {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  margin-right: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 5px;
+  background: none;
+  color: var(--dim);
+  cursor: pointer;
+  opacity: 0;
+  /* 隐藏态必须 pointer-events:none（同 .md-code-copy 的规矩）：opacity:0 的元素
+     仍吃点击，会挡住文件名的文本拖选 */
+  pointer-events: none;
+  transition:
+    opacity var(--dur-fast),
+    background var(--dur-fast),
+    color var(--dur-fast);
+}
+
+.file-row:hover .file-preview-btn,
+.file-preview-btn:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.file-preview-btn:hover {
+  background: var(--panel-2);
+  color: var(--text);
+}
+
 .file-name {
   flex: 1;
   min-width: 0;
@@ -2095,6 +2144,22 @@ mark {
   border-radius: 0;
 }
 
+/* 正文里的文件路径 chip（lib/file-links.ts 包出来的 <a>）：点状虚线常显 = 「可点」
+   的最轻暗示，hover 变实线 accent。color:inherit 必须——<a> 的 UA 默认色会压过
+   <code> 的继承色；.md-body code「彩色字无底」的定稿不动，chip 只叠下划线 */
+.md-body a.md-file-link {
+  color: inherit;
+  cursor: pointer;
+  text-decoration: underline dotted var(--dim);
+  text-underline-offset: 3px;
+  transition: color var(--dur-fast);
+}
+
+.md-body a.md-file-link:hover {
+  color: var(--accent);
+  text-decoration: underline solid var(--accent);
+}
+
 /* 代码块：TUI 是虚线灰边的盒子（CLI 实现 borderStyle:"dashed", borderColor:"subtle"），
    不再用白底填充；块内逐 token 的颜色由下面那组 .hljs-* 规则给。
    字号跟着正文抬一档（12→13），仍是全页最小的等宽块，保持「引用物」的层级 */
@@ -2514,6 +2579,56 @@ html.ctrl-links .md-body a {
   white-space: nowrap;
 }
 
+/* 卡头上可点的路径段（DiffPathPart，md/html 才渲染）：与正文 chip 同款手势
+   （点击预览 / 右键菜单 / Ctrl+点击默认程序），虚线只 hover 才显——卡头路径
+   本来就挤，常驻下划线太吵 */
+.diff-path-link {
+  cursor: pointer;
+}
+
+.diff-path-link:hover {
+  color: var(--text);
+  text-decoration: underline dotted var(--dim);
+  text-underline-offset: 3px;
+}
+
+/* diff 卡头的文件菜单钮：与 .md-code-copy 同构的 ghost 钮（hover 浮现）。
+   ⚠️ 卡头 .diff-summary 是 baseline 对齐 + flex-wrap，按钮用 align-self 自己
+   居中——别为它改共用类的三条真源规则 */
+.diff-head-menu {
+  flex-shrink: 0;
+  align-self: center;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--dim);
+  cursor: pointer;
+  opacity: 0;
+  /* 隐藏态必须 pointer-events:none（同 .md-code-copy 的规矩）：opacity:0 的元素
+     仍吃点击，会挡住右侧条带的文本拖选 */
+  pointer-events: none;
+  transition:
+    opacity var(--dur-fast),
+    background var(--dur-fast),
+    color var(--dur-fast);
+}
+
+.diff-summary:hover .diff-head-menu,
+.diff-head-menu:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.diff-head-menu:hover {
+  background: var(--panel-2);
+  color: var(--text);
+}
+
 /* 行数摘要：Added 6 lines, removed 3 lines */
 .diff-summary-sub {
   font-size: 11px;
@@ -2797,6 +2912,18 @@ html.ctrl-links .md-body a {
 
 .context-item:hover {
   background: var(--panel-2);
+}
+
+/* 文件菜单（FileContextMenu）：条目带图标，共用的 .context-item 是 display:block
+   （真源无图标先例），这里按条目切 flex 做图标垂直居中；图标随 muted 色 */
+.file-menu .context-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.file-menu .context-item svg {
+  color: var(--muted);
 }
 
 .context-danger {
@@ -3659,6 +3786,153 @@ html.ctrl-links .md-body a {
   font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
+
+/* ============ 文件预览浮层（FilePreviewOverlay）：lightbox 同款交互契约 ============ */
+.overlay.file-preview {
+  z-index: 950;
+  background: rgba(0, 0, 0, 0.78);
+  overflow: auto;
+}
+
+/* 控件行：文件名胶囊 + 动作钮，与 .lightbox-close 同款贴顶让位（WCO 系统按钮之下） */
+.fp-bar {
+  position: fixed;
+  top: calc(var(--titlebar-h) + 12px);
+  left: 16px;
+  right: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  animation: fp-bar-in var(--dur-med) var(--ease-out-soft);
+}
+
+@keyframes fp-bar-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+
+.fp-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 50%;
+  padding: 6px 12px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 12px;
+}
+
+.fp-kind {
+  display: inline-flex;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.fp-name .fp-file {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.fp-name .fp-path {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: rgba(255, 255, 255, 0.62);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.fp-spacer {
+  flex: 1;
+}
+
+.fp-btn {
+  height: 30px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: none;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background var(--dur-fast);
+}
+
+.fp-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.fp-btn.fp-icon-only {
+  width: 30px;
+  padding: 0;
+}
+
+.fp-btn.fp-btn-text {
+  padding: 0 12px 0 10px;
+}
+
+/* 内容区：md = 面板卡（.md-body 的全局样式直接生效），html = 白底 iframe 卡。
+   遮罩空白（stage 与卡片之间）mousedown 同样可关——FilePreviewOverlay 的
+   target === currentTarget 判定覆盖 overlay 与 stage 两层 */
+.fp-stage {
+  position: fixed;
+  inset: calc(var(--titlebar-h) + 54px) 16px 16px;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  animation: fp-stage-in var(--dur-med) var(--ease-out-soft);
+}
+
+@keyframes fp-stage-in {
+  from {
+    opacity: 0;
+    transform: scale(0.985);
+  }
+}
+
+.fp-md-card {
+  /* 面板铺满 stage（与 .fp-html-card 同款最大化处理），正文列在卡内收成可读
+     版心居中——prose 拉满没法读，满宽的是「面板」不是文本 */
+  width: 100%;
+  background: var(--panel);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  padding: 26px 30px;
+  overflow-y: auto;
+  /* 覆盖 body 的 user-select: none，允许选择复制预览内容（同会话内容区的局部放行） */
+  user-select: text;
+}
+
+.fp-md-card > .md-body {
+  /* 版心随窗口放宽（min 上限防超宽屏上行太长；宽表格类文档在大屏不再是瓶颈） */
+  max-width: min(1240px, 92%);
+  margin: 0 auto;
+}
+
+.fp-html-card {
+  /* 撑满 stage：html 预览 = 浏览器视口的心智模型，页面内部有自己的版心与边距，
+     定宽卡片在最大化窗口两侧留大片黑底（卡片 1040px 是按最小窗宽定的） */
+  width: 100%;
+  background: #fff;
+  border-radius: 8px;
+  overflow: hidden;
+  display: flex;
+}
+
+.fp-html-card iframe {
+  flex: 1;
+  border: none;
+  background: #fff;
+}
+
 
 /* ⚠️ 别给助手消息加 border-left 之类「轮次锚点」（2026-09-22 试过并否掉）：
    一轮回答在 DOM 里是**多个同级的 .chat-msg-assistant**（renderStream 里 flush() 把

@@ -13,6 +13,14 @@ import {
   normalizeKeyword,
 } from "../lib/keyword-highlight";
 import { installCtrlLinkOpen, linkifyHtml } from "../lib/links";
+import {
+  emitFileMenu,
+  emitFileOpenDefault,
+  emitFilePreview,
+  installFileLinkGestures,
+  linkifyFilePaths,
+  previewablePath,
+} from "../lib/file-links";
 import { materializeListMarkers } from "../lib/list-markers";
 import type { ContentBlock } from "../types";
 import {
@@ -22,6 +30,7 @@ import {
   CopyIcon,
   FileDiffIcon,
   FileTextIcon,
+  MoreIcon,
   TriangleAlertIcon,
   WrenchIcon,
 } from "./Icons";
@@ -32,6 +41,8 @@ installMarkdownExtensions();
 // 正文链接的 Ctrl+点击打开（幂等，见 lib/links.ts）：键盘/点击监听也是全局副作用，
 // 与上面同款「模块顶层装一次」。
 installCtrlLinkOpen();
+// 正文文件路径的 chip 化 + 三手势（幂等，见 lib/file-links.ts）：同款「模块顶层装一次」。
+installFileLinkGestures();
 // 代码块复制按钮的点击委托（幂等，见 lib/code-copy.ts）：同款「模块顶层装一次」。
 installCodeCopy();
 
@@ -100,21 +111,26 @@ export function UserMsgCopyButton({ text }: { text: string }) {
   );
 }
 
-/** Markdown 渲染（marked + DOMPurify 消毒 + 列表标记物化 + URL 补链 + 代码块复制按钮，
- *  cc-haha 同方案）。三步后处理都在消毒**之后**：列表标记物化（materializeListMarkers）
- *  把 `<ol>` 编号与 `<ul>` 圆点换成真实文本节点（原生 marker 在 Chromium 里选不中也
- *  复制不到，详见 lib/list-markers.ts 头部）；补链（linkifyHtml）处理行内代码/代码块
- *  里的 URL（marked 永远不链，而模型爱把地址包反引号），并顺手修 marked 自动链接吞
- *  中文标点进 href 的坑，详见 lib/links.ts 头部；代码块复制按钮（decorateCodeBlocks）
- *  把每个 `<pre>` 包进 .md-code 并前置按钮，点击经 installCodeCopy 的委托复制代码
- *  原文，详见 lib/code-copy.ts 头部。 */
+/** Markdown 渲染（marked + DOMPurify 消毒 + 列表标记物化 + URL 补链 + 文件路径 chip
+ *  + 代码块复制按钮，cc-haha 同方案）。后处理都在消毒**之后**：列表标记物化
+ *  （materializeListMarkers）把 `<ol>` 编号与 `<ul>` 圆点换成真实文本节点（原生 marker
+ *  在 Chromium 里选不中也复制不到，详见 lib/list-markers.ts 头部）；补链（linkifyHtml）
+ *  处理行内代码/代码块里的 URL（marked 永远不链，而模型爱把地址包反引号），并顺手修
+ *  marked 自动链接吞中文标点进 href 的坑，详见 lib/links.ts 头部；路径 chip
+ *  （linkifyFilePaths）把以白名单扩展名结尾的文件路径包成可点 `<a>`（点击预览/右键
+ *  菜单/Ctrl+点击默认程序，详见 lib/file-links.ts 头部），必须排在 URL 补链**之后**
+ *  ——两种正则互不命中，但已在 `<a>` 里的路径要靠这一步跳过；代码块复制按钮
+ *  （decorateCodeBlocks）把每个 `<pre>` 包进 .md-code 并前置按钮，点击经 installCodeCopy
+ *  的委托复制代码原文，详见 lib/code-copy.ts 头部。 */
 export function MarkdownText({ text, highlight }: { text: string; highlight?: string }) {
   const html = useMemo(() => {
     try {
       const base = decorateCodeBlocks(
-        linkifyHtml(
-          materializeListMarkers(
-            DOMPurify.sanitize(marked.parse(text, { async: false }) as string),
+        linkifyFilePaths(
+          linkifyHtml(
+            materializeListMarkers(
+              DOMPurify.sanitize(marked.parse(text, { async: false }) as string),
+            ),
           ),
         ),
       );
@@ -280,6 +296,50 @@ function ToolErrorOutput({
   );
 }
 
+/** diff 卡头的路径段：md/html 文件时路径可点（点击预览 / 右键菜单 / Ctrl+点击默认
+ *  程序）+ 右侧 ⋯ 菜单钮，其余扩展名维持纯文本。卡头在 `<summary>` 里——点击路径
+ *  与菜单钮都 preventDefault（拦掉 summary 的原生展开，不然点一下连折叠带预览）、
+ *  stopPropagation；动作经 ccfile:* 事件冒泡到 ChatView 根收口（见 lib/file-links.ts） */
+function DiffPathPart({ filePath, highlight }: { filePath: string; highlight?: string }) {
+  if (!previewablePath(filePath)) {
+    return <span className="diff-path">{highlightKeyword(filePath, highlight)}</span>;
+  }
+  return (
+    <>
+      <span
+        className="diff-path diff-path-link"
+        title="点击预览，右键更多操作，Ctrl+点击用系统默认程序打开"
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (e.ctrlKey) emitFileOpenDefault(e.currentTarget, filePath);
+          else emitFilePreview(e.currentTarget, filePath);
+        }}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          emitFileMenu(e.currentTarget, filePath, e.clientX, e.clientY);
+        }}
+      >
+        {highlightKeyword(filePath, highlight)}
+      </span>
+      <button
+        type="button"
+        className="diff-head-menu"
+        title="文件操作"
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const r = e.currentTarget.getBoundingClientRect();
+          emitFileMenu(e.currentTarget, filePath, r.left, r.bottom + 4);
+        }}
+      >
+        <MoreIcon size={13} />
+      </button>
+    </>
+  );
+}
+
 /** 代码变更卡片：Claude Code 风格（resultBlock 出错时在 diff 末尾附错误输出） */
 export function CodeChangeCard({
   block,
@@ -306,7 +366,7 @@ export function CodeChangeCard({
             <FileDiffIcon size={12} />
           </span>
           <span className="diff-title">{highlightKeyword("Edit", highlight)}</span>
-          <span className="diff-path">{highlightKeyword(filePath, highlight)}</span>
+          <DiffPathPart filePath={filePath} highlight={highlight} />
         </summary>
         <div className="diff-summary-sub">
           {editSummary(oldLines.length, newLines.length)}
@@ -330,7 +390,7 @@ export function CodeChangeCard({
             <FileDiffIcon size={12} />
           </span>
           <span className="diff-title">{highlightKeyword("Write", highlight)}</span>
-          <span className="diff-path">{highlightKeyword(filePath, highlight)}</span>
+          <DiffPathPart filePath={filePath} highlight={highlight} />
         </summary>
         <div className="diff-summary-sub">
           Added {content.length} line{content.length > 1 ? "s" : ""}
@@ -358,7 +418,7 @@ export function CodeChangeCard({
             <FileDiffIcon size={12} />
           </span>
           <span className="diff-title">{highlightKeyword("MultiEdit", highlight)}</span>
-          <span className="diff-path">{highlightKeyword(filePath, highlight)}</span>
+          <DiffPathPart filePath={filePath} highlight={highlight} />
         </summary>
         <div className="diff-summary-sub">
           {edits.length} edit{edits.length !== 1 ? "s" : ""}

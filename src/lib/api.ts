@@ -311,6 +311,25 @@ export const api = {
   providerQueryUsage: (id: string) => invoke<UsageResult>("provider_query_usage", { id }),
   /** 用系统默认浏览器打开外部链接（官网 / 获取 API Key） */
   openUrl: (url: string) => invoke("open_url", { url }),
+  // ---------- 文件预览与打开（消息里的生成文件路径 chip） ----------
+  // base = 相对路径的解析根（ChatView 传项目根），`~` 展开与拼接都在主进程做
+  /** 系统默认程序打开本地文件（.html = 默认浏览器）；error 非 null = 系统报告的失败原因 */
+  openFile: (path: string, base?: string) => invoke<{ error: string | null }>("open_file", { path, base }),
+  /** 资源管理器 / Finder 定位并选中文件 */
+  revealFile: (path: string, base?: string) => invoke("reveal_file", { path, base }),
+  /** 预览前探：文件是否存在且为常规文件（fs 错误归为不存在；resolved = 解析后绝对路径） */
+  previewStat: (path: string, base?: string) =>
+    invoke<{ exists: boolean; isFile: boolean; size: number; resolved: string }>("preview_stat", {
+      path,
+      base,
+    }),
+  /** 读预览内容：扩展名白名单（md/html/htm）+ 10MB 上限，越界 reject（中文原因） */
+  previewRead: (path: string, base?: string) =>
+    invoke<{ content: string; resolved: string }>("preview_read", { path, base }),
+  /** 登记 ccpreview:// 读盘白名单（被预览文件所在目录 + 项目根）与当前顶层文档；
+   *  打开预览浮层前调用，html 顶层文档会由主进程注入 storage shim */
+  previewRegisterRoots: (docPath: string, roots: string[]) =>
+    invoke("preview_register_roots", { docPath, roots }),
   // ---------- 系统对话框（替代 @tauri-apps/plugin-dialog） ----------
   /** 选择文件夹，取消返回 null */
   pickFolder: (title: string) => invoke<string | null>("pick_folder", { title }),

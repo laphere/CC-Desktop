@@ -53,6 +53,15 @@ export interface PinnedSessionPayload {
   projectPath: string;
 }
 
+/** 可预览的扩展名白名单（小写、含点）：文件预览的**单一真源**——读侧校验
+ *  （backend/files.ts）与渲染层识别（src/lib/file-links.ts 的 chip 正则同表）。
+ *  扩类型时两处同步，白名单外路径不做 chip、拒绝读取 */
+export const PREVIEW_EXTENSIONS = [".md", ".html", ".htm"] as const;
+
+/** 单文件预览读取上限（字节）：读侧（preview_read）与渲染层 html 预挡双挡共用
+ *  同一常量；ccpreview:// 协议的子资源不做此限制（目录白名单是它的边界） */
+export const PREVIEW_MAX_BYTES = 10 * 1024 * 1024;
+
 export interface IpcContract {
   // ---------- 项目清单（路径模型，去脚本化） ----------
   list_projects: void;
@@ -186,6 +195,21 @@ export interface IpcContract {
   fetch_models_for_config: { baseUrl: string; apiKey: string };
   provider_query_usage: { id: string };
   open_url: { url: string };
+  // ---------- 文件预览与打开（消息里的生成文件路径 chip） ----------
+  // base = 相对路径的解析根（= 会话的项目根）；主进程统一做 `~` 展开与拼接
+  /** 系统默认程序打开本地文件（.html = 默认浏览器）。error 为 null = 成功，
+   *  非 null = shell.openPath 回执的失败原因（系统语言，可直显） */
+  open_file: { path: string; base?: string };
+  /** 资源管理器 / Finder 定位并选中文件（OS 层无失败回执，与 open_folder 同款静默） */
+  reveal_file: { path: string; base?: string };
+  /** 预览前探：存在性 + 是否常规文件 + 字节数（fs 错误一律归为不存在，不 reject）；
+   *  resolved = 解析后的绝对路径 */
+  preview_stat: { path: string; base?: string };
+  /** 读预览内容：扩展名白名单（md/html/htm）+ 10MB 上限，越界 reject（中文原因可直显） */
+  preview_read: { path: string; base?: string };
+  /** 登记 ccpreview:// 的读盘白名单（被预览文件所在目录 + 项目根，append 上限 16）
+   *  并记录当前顶层文档；打开预览浮层前调用 */
+  preview_register_roots: { docPath: string; roots: string[] };
   // ---------- 其他 ----------
   get_data_root: void;
   quit_app: void;
@@ -309,6 +333,11 @@ export const IPC_CHANNELS = [
   "fetch_models_for_config",
   "provider_query_usage",
   "open_url",
+  "open_file",
+  "reveal_file",
+  "preview_stat",
+  "preview_read",
+  "preview_register_roots",
   "get_data_root",
   "quit_app",
   "autostart_supported",
