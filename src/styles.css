@@ -839,6 +839,28 @@ code {
   border-top: 1px solid var(--border);
 }
 
+/* ============ 顶栏搜索的会话结果区（搜索期间顶在置顶区原位） ============ */
+
+/* 状态行：字号口径复用查看器搜索的 .search-status；左栏静态区不加 spinner 动画 */
+.session-hits .search-status {
+  padding: 0 4px 6px;
+}
+
+/* mark 必须作用域在本区：全局 mark（服务聊天消息）是 --star 底色，搜索高亮走
+   accent 主题变量，两套不能混。深色下需再压过 [data-theme="dark"] mark 的 color——
+   那条与本条特异性同权重且靠后，不补覆盖的话深色下高亮文字会被染成近黑 */
+.session-hits mark {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+  border-radius: 3px;
+  padding: 0 1px;
+}
+
+[data-theme="dark"] .session-hits mark {
+  color: var(--accent);
+}
+
 /* ============ 回收站 ============ */
 .trash-list {
   display: flex;

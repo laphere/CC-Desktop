@@ -6,12 +6,14 @@ import * as path from "node:path";
 
 import {
   searchSessionMessages,
+  searchSessions,
   getSessionUserPrompts,
   exportSession,
   renderSessionMarkdown,
   purgeClaudeProjectData,
   listPinnedSessions,
   MAX_SEARCH_HITS,
+  MAX_SESSION_SEARCH_RESULTS,
   type SessionMessage,
 } from "./session-extra";
 import { mangleProjectPath } from "./mangle";
@@ -93,6 +95,155 @@ describe("searchSessionMessages", () => {
     const outside = path.join(tmp, UUID_A + ".jsonl");
     fs.writeFileSync(outside, line("user", "needle"), "utf8");
     expect(() => searchSessionMessages(outside, "needle", projects)).toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 1.5 跨项目全局会话搜索（顶栏搜索的会话档；快档 / 全文档两档 + 早停截断）
+// ---------------------------------------------------------------------------
+describe("searchSessions", () => {
+  /** 会话写入 mangled 项目子目录（searchSessions 枚举的是 <projects>/<mangled>/） */
+  function writeProjectSession(projectPath: string, uuid: string, lines: string[]): string {
+    const dir = path.join(projects, mangleProjectPath(projectPath));
+    fs.mkdirSync(dir, { recursive: true });
+    const p = path.join(dir, uuid + ".jsonl");
+    fs.writeFileSync(p, lines.join("\n") + "\n", "utf8");
+    return p;
+  }
+
+  const PROJ_A = "D:\\ws\\alpha";
+  const PROJ_B = "D:\\ws\\beta";
+
+  it("标题命中收录（结果形状与置顶区元数据同构）", async () => {
+    writeProjectSession(PROJ_A, UUID_A, [
+      line("user", "讨论这里的细节"),
+      '{"type":"ai-title","aiTitle":"趋势图台账聚合"}',
+    ]);
+    const out = await searchSessions(projects, "台账", [PROJ_A]);
+    expect(out.results.length).toBe(1);
+    expect(out.truncated).toBe(false);
+    expect(out.results[0].projectPath).toBe(PROJ_A);
+    expect(out.results[0].title).toBe("趋势图台账聚合");
+    expect(out.results[0].summary).toBe("讨论这里的细节");
+    expect(out.results[0].file).toBe(path.join(projects, mangleProjectPath(PROJ_A), UUID_A + ".jsonl"));
+  });
+
+  it("摘要命中也收录（标题不含关键词）", async () => {
+    writeProjectSession(PROJ_A, UUID_A, [
+      line("user", "别的什么问题"),
+      '{"type":"summary","summary":"关于台账的总结"}',
+    ]);
+    const out = await searchSessions(projects, "台账", [PROJ_A]);
+    expect(out.results.length).toBe(1);
+  });
+
+  it("大小写不敏感 + 连续空白折叠（foo  bar 命中 foo bar）", async () => {
+    writeProjectSession(PROJ_A, UUID_A, [
+      line("user", "讨论数据同步"),
+      '{"type":"ai-title","aiTitle":"fix FOO  BAR flow"}',
+    ]);
+    const out = await searchSessions(projects, "foo  bar", [PROJ_A]);
+    expect(out.results.length).toBe(1);
+  });
+
+  it("无命中返回空；空关键词直接短路", async () => {
+    writeProjectSession(PROJ_A, UUID_A, [line("user", "普通内容")]);
+    expect((await searchSessions(projects, "不存在词", [PROJ_A])).results.length).toBe(0);
+    expect(await searchSessions(projects, "  ", [PROJ_A])).toEqual({
+      results: [],
+      truncated: false,
+    });
+  });
+
+  it("口径与 listSessions 同源：侧链 / 空 mangled 路径 / 目录缺失均静默跳过", async () => {
+    // 侧链会话不展示（首行 isSidechain）
+    writeProjectSession(PROJ_A, UUID_A, [
+      '{"parentUuid":null,"isSidechain":true,"type":"user","message":{"role":"user","content":"台账子会话"}}',
+    ]);
+    const out = await searchSessions(projects, "台账", [PROJ_A, "", PROJ_B]);
+    expect(out.results.length).toBe(0); // PROJ_B 目录根本没建，也不抛错
+  });
+
+  it("「未命名会话」占位标题不召回（摘要命中不受影响）", async () => {
+    // 只有 summary 行、没有用户消息 → title 落到占位词「未命名会话」
+    writeProjectSession(PROJ_A, UUID_A, ['{"type":"summary","summary":"台账相关总结"}']);
+    expect((await searchSessions(projects, "未命名", [PROJ_A])).results.length).toBe(0);
+    expect((await searchSessions(projects, "台账", [PROJ_A])).results.length).toBe(1);
+  });
+
+  it("正文命中不召回：标题/摘要不含关键词时，正文（text / tool_use 输入）命中也不出", async () => {
+    // 会话 1：正文 text 命中；会话 2：tool_use 输入命中——都不该进结果
+    writeProjectSession(PROJ_A, UUID_A, [
+      line("user", "修一下登录"),
+      line("assistant", [
+        { type: "thinking", thinking: "台账在 thought 里" },
+        { type: "tool_result", content: "台账在 result 里" },
+        { type: "text", text: "把台账导出改成流式" },
+      ]),
+      '{"type":"ai-title","aiTitle":"登录修复"}',
+    ]);
+    writeProjectSession(PROJ_A, UUID_B, [
+      line("user", "跑一下搜索"),
+      line("assistant", [{ type: "tool_use", name: "Grep", id: "t1", input: { pattern: "台账" } }]),
+      '{"type":"ai-title","aiTitle":"跑搜索"}',
+    ]);
+    const out = await searchSessions(projects, "台账", [PROJ_A]);
+    expect(out.results.length).toBe(0); // 内容级搜索由会话页内的 search_session_messages 承担
+  });
+
+  it("跨项目按 mtime 倒序合并（同毫秒按路径次级键）", async () => {
+    const older = writeProjectSession(PROJ_A, UUID_A, [
+      line("user", "x"),
+      '{"type":"ai-title","aiTitle":"台账旧会话"}',
+    ]);
+    const newer = writeProjectSession(PROJ_B, UUID_B, [
+      line("user", "y"),
+      '{"type":"ai-title","aiTitle":"台账新会话"}',
+    ]);
+    const base = Date.now();
+    fs.utimesSync(older, new Date(base), new Date(base - 60_000));
+    fs.utimesSync(newer, new Date(base), new Date(base));
+    const out = await searchSessions(projects, "台账", [PROJ_A, PROJ_B]);
+    expect(out.results.length).toBe(2);
+    expect(out.results[0].projectPath).toBe(PROJ_B); // 新的在前
+    expect(out.results[1].projectPath).toBe(PROJ_A);
+  });
+
+  it("mangle 碰撞去重：两条路径变体落同一目录，会话只收录一次", async () => {
+    // b_x 与 b-x 经 mangle（_ 与字面 - 都映射为 -）落进同一目录
+    writeProjectSession("D:\\a\\b_x", UUID_A, [
+      line("user", "n"),
+      '{"type":"ai-title","aiTitle":"台账唯一"}',
+    ]);
+    const out = await searchSessions(projects, "台账", ["D:\\a\\b_x", "D:\\a\\b-x"]);
+    expect(out.results.length).toBe(1);
+  });
+
+  it("上限早停：恰好满 50 不算截断，51 条截断为最新的前 50（全局排序后截断）", async () => {
+    const base = Date.now();
+    const write = (n: number) => {
+      const id = "5426d6d0-c08f-43bd-94df-" + n.toString(16).padStart(12, "0");
+      const p = writeProjectSession(PROJ_A, id, [
+        line("user", "c" + n),
+        `{"type":"ai-title","aiTitle":"批量标题会话 ${n}"}`,
+      ]);
+      // i 越大越旧：新→旧 = 0,1,2,...
+      fs.utimesSync(p, new Date(base), new Date(base - n * 60_000));
+    };
+    for (let n = 0; n < MAX_SESSION_SEARCH_RESULTS; n++) write(n);
+    const full = await searchSessions(projects, "批量", [PROJ_A]);
+    expect(full.results.length).toBe(MAX_SESSION_SEARCH_RESULTS);
+    expect(full.truncated).toBe(false);
+    expect(full.results[0].title).toBe("批量标题会话 0"); // 最新的在前
+
+    write(MAX_SESSION_SEARCH_RESULTS); // 第 51 条（最旧）
+    const over = await searchSessions(projects, "批量", [PROJ_A]);
+    expect(over.results.length).toBe(MAX_SESSION_SEARCH_RESULTS);
+    expect(over.truncated).toBe(true);
+    expect(over.results[0].title).toBe("批量标题会话 0");
+    expect(over.results[MAX_SESSION_SEARCH_RESULTS - 1].title).toBe(
+      `批量标题会话 ${MAX_SESSION_SEARCH_RESULTS - 1}`,
+    );
   });
 });
 

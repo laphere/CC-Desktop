@@ -46,6 +46,7 @@ import type {
   SessionMessages,
   SessionUsageStats,
   SessionSearchHit,
+  SessionSearchOutcome,
   SessionUserPrompt,
   TrashedSession,
   UsageResult,
@@ -135,6 +136,9 @@ export const api = {
   /** 会话内全文搜索（返回命中消息序号与上下文片段） */
   searchSessionMessages: (file: string, keyword: string) =>
     invoke<SessionSearchHit[]>("search_session_messages", { file, keyword }),
+  /** 顶栏全局会话搜索（跨项目；只搜标题/摘要，不扫正文） */
+  searchSessions: (keyword: string) =>
+    invoke<SessionSearchOutcome>("search_sessions", { keyword }),
   /** 会话全量用户发言（对话进度条导航轨） */
   getSessionUserPrompts: (file: string) =>
     invoke<SessionUserPrompt[]>("get_session_user_prompts", { file }),

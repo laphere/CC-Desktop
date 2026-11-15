@@ -1,3 +1,5 @@
+import type { Project } from "../types";
+
 /**
  * 会话文件路径 ↔ 会话 id 的纯逻辑（渲染层用）。
  *
@@ -26,4 +28,12 @@ export function sessionIdFromFile(file: string): string | null {
  *  与 sessionIdFromFile 同一条「双分隔符」口径：路径可能来自别的机器。 */
 export function pathLeafName(p: string): string {
   return p.split(/[\\/]/).filter(Boolean).pop() ?? p;
+}
+
+/** 项目名徽标的取值：优先项目列表里的名字（key 即项目路径），项目已不在列表里
+ *  （手工改过 config、数据根换机器等）时退化为路径末段。置顶区与搜索结果区共用。 */
+export function projectNameOf(projects: Project[], path: string): string {
+  const hit = projects.find((p) => p.key === path);
+  if (hit) return hit.name;
+  return pathLeafName(path);
 }

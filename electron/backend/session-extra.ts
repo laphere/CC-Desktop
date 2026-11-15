@@ -126,20 +126,27 @@ function makeSnippet(text: string, hit: number, kw: string, radius: number): str
 }
 
 /**
- * 全文件全文搜索：text 块 + tool_use 输入，跳过 thinking / tool_result；
- * 大小写不敏感，按消息顺序返回，最多 MAX_SEARCH_HITS 条。
- * 命中结构（消息序号 + 块序号 + 上下文片段）供前端跨分页跳转与展开 diff 卡。
+ * 关键词归一口径：trim + 连续空白折叠为单空格 + lowercase。折叠空白的原因：
+ * searchSessions 匹配的标题/摘要来自 cleanSummary（折叠过空白、截 150 字符），
+ * 关键词不折叠的话「foo  bar」永远命中不了同款双空格标题。
+ * 有意取舍：正文 haystack（searchSessionMessages 的扫描）不随之折叠——折叠正文
+ * 会让 indexOf 下标对不上原文、makeSnippet 的码点切片错位，代价是 kw 含连续空白
+ * 时对含同款连续空白的正文不再命中。
+ * ⚠️ 前端高亮（src/components/SessionRow.tsx highlightKeyword）必须与本函数逐字
+ * 同步，否则会「命中不亮」/错位——两边各写一份（主进程不引渲染层模块），改要同步。
  */
-export function searchSessionMessages(
-  file: string,
-  keyword: string,
-  projectsDir: string = claudeProjectsDir(),
-): SessionSearchHit[] {
-  const kw = keyword.trim().toLowerCase();
-  if (kw === "") return [];
-  const { path: p } = resolveSessionFile(file, projectsDir);
-  const content = fs.readFileSync(p, "utf8");
-  const messages = parseSessionMessages(content);
+function normalizeKeyword(keyword: string): string {
+  return keyword.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+/**
+ * 已解析消息的全文扫描核：text 块 + tool_use 输入，跳过 thinking / tool_result /
+ * image；大小写不敏感，按消息顺序返回，最多 MAX_SEARCH_HITS 条。命中结构（消息
+ * 序号 + 块序号 + 上下文片段）供前端跨分页跳转与展开 diff 卡。
+ * 单会话搜索（searchSessionMessages）与跨项目全局搜索（searchSessions）共用，
+ * 改这里两个调用方的行为与测试都要回归。
+ */
+function scanParsedMessages(messages: SessionMessage[], kw: string): SessionSearchHit[] {
   const out: SessionSearchHit[] = [];
   for (let index = 0; index < messages.length; index++) {
     const m = messages[index];
@@ -172,6 +179,152 @@ export function searchSessionMessages(
     }
   }
   return out;
+}
+
+/**
+ * 单文件全文搜索：text 块 + tool_use 输入，跳过 thinking / tool_result；
+ * 大小写不敏感，按消息顺序返回，最多 MAX_SEARCH_HITS 条。
+ */
+export function searchSessionMessages(
+  file: string,
+  keyword: string,
+  projectsDir: string = claudeProjectsDir(),
+): SessionSearchHit[] {
+  const kw = normalizeKeyword(keyword);
+  if (kw === "") return [];
+  const { path: p } = resolveSessionFile(file, projectsDir);
+  const content = fs.readFileSync(p, "utf8");
+  return scanParsedMessages(parseSessionMessages(content), kw);
+}
+
+// ----------------------------------------------------------------------------
+// 跨项目全局会话搜索（顶栏搜索的会话档；只搜标题/摘要，不扫正文——内容级搜索
+// 由会话页内的 search_session_messages 承担。上限沿用 docs/session-search-plan.md）
+// ----------------------------------------------------------------------------
+
+/** 跨会话结果上限（session-search-plan.md §2.4：最多展示 50 个会话） */
+export const MAX_SESSION_SEARCH_RESULTS = 50;
+
+/** searchSessions 的返回：results 已按 lastModified 倒序（同毫秒按 file 路径次级键
+ *  稳定排序），最多 MAX_SESSION_SEARCH_RESULTS 条。truncated=true = 上限已满**且仍有
+ *  候选未扫**（未扫者未必命中——truncated=true 时实际命中可能恰为 50）；截断发生在
+ *  **全局排序之后**（先按 mtime 全序扫描再早停），不是按项目各自截断，前端可放心
+ *  显示「前 50 个会话」。 */
+export interface SessionSearchOutcome {
+  results: PinnedSessionInfo[];
+  truncated: boolean;
+}
+
+/** 扫描切片让位间隔：连续同步扫描超过该毫秒数就 setImmediate 让出事件循环一次，
+ *  避免大语料的枚举 + 逐文件解析把主进程 IPC（PTY 输出 / chat 事件 / 窗口消息）
+ *  冻结数秒——与 Tauri 线 spawn_blocking 同目的的 Electron 侧做法 */
+const SCAN_YIELD_MS = 15;
+
+/**
+ * 跨项目全局会话搜索（**标题/摘要**口径，不读正文全文）。projectPaths 由调用方按
+ * **左栏可见项目**口径传入（main.ts 与 list_projects 同源：扫描 ∪ 手动添加 − 排除
+ * 清单），保证搜索范围与左栏一致。
+ *
+ * 扫描策略：先枚举全部候选文件并取 mtime，**全局 mtime 倒序**逐文件处理，凑满上限
+ * 即早停——未扫文件的 mtime 不大于第 50 名，不可能挤进结果（同毫秒并列取先扫者）。
+ * 只读每个文件首尾 64KB 提取元数据（与左栏列表同一份数据），标题或摘要命中即收录。
+ *
+ * 「未命名会话」占位标题不召回（摘要召回保留）：它是 sessionMetaFromLite 的
+ * **语义为空**兜底档，关键词恰为「未命名」时会把全部无题会话卷进来。正在起名的
+ * 会话**不过滤**（list_sessions 的 titlePendingIds 口径不适用于搜索）：标题此刻是
+ * 首条用户消息兜底档，点开走 continueSessionTab 只读页，无副作用。
+ *
+ * 单文件任何一步失败（枚举与读取的间隙文件被删/清回收站/换数据根）都静默跳过，
+ * 与 readHeadTail 返回 null 同语义——一个文件的竞态不允许击穿全部项目的搜索。
+ *
+ * 阻塞边界（协作式让位的接受项）：枚举阶段（readdir + 逐文件 statSync）是同步大
+ * 切片，只能等文件间隙让位——数千会话的数据根上枚举可阻塞数百 ms。若实测有问题，
+ * 优先给枚举按批让位，不要把枚举改 worker。
+ *
+ * 枚举口径必须与 listSessions（sessions.ts）逐字一致：readdirSync（**不得**改成
+ * withFileTypes + Dirent.isFile——符号链接形式的 jsonl 依赖 statSync 跟链判定，
+ * Dirent 判型会把链接条目漏掉，ccassets 在 a5b566e 踩过反向的坑）、statSync().isFile()、
+ * isValidUuid、空文件/侧链/纯元数据会话经 readHeadTail 与 sessionMetaFromLite 的
+ * null 跳过、lastModified 用 readHeadTail 的 mtime Math.round 取整（与列表排序同源）。
+ */
+export async function searchSessions(
+  projectsDir: string,
+  keyword: string,
+  projectPaths: string[],
+): Promise<SessionSearchOutcome> {
+  const kw = normalizeKeyword(keyword);
+  if (kw === "") return { results: [], truncated: false };
+  const root = path.resolve(projectsDir);
+
+  // 枚举：mangle 去重（两条路径写法变体会落进同一目录，如 b_x 与 b-x），空 mangled
+  // 跳过（与 purgeOneProjectData 防线 1 同款），目录不存在静默跳过
+  const seenDirs = new Set<string>();
+  const candidates: { file: string; mtimeMs: number; sessionId: string; projectPath: string }[] = [];
+  for (const rawPath of projectPaths) {
+    const mangled = mangleProjectPath(String(rawPath).trim());
+    if (mangled === "") continue;
+    const dirKey = mangled.toLowerCase();
+    if (seenDirs.has(dirKey)) continue;
+    seenDirs.add(dirKey);
+    const dir = path.join(root, mangled);
+    let names: string[];
+    try {
+      names = fs.readdirSync(dir);
+    } catch {
+      continue;
+    }
+    for (const name of names) {
+      if (!name.endsWith(".jsonl")) continue;
+      const p = path.join(dir, name);
+      let st: fs.Stats;
+      try {
+        st = fs.statSync(p);
+      } catch {
+        continue;
+      }
+      if (!st.isFile()) continue;
+      const sessionId = name.slice(0, -".jsonl".length);
+      if (!isValidUuid(sessionId)) continue;
+      candidates.push({ file: p, mtimeMs: st.mtimeMs, sessionId, projectPath: String(rawPath) });
+    }
+  }
+
+  // 全局 mtime 倒序；同毫秒按路径次级键，输出稳定不抖动
+  candidates.sort(
+    (a, b) => b.mtimeMs - a.mtimeMs || (a.file < b.file ? -1 : 1),
+  );
+
+  const results: PinnedSessionInfo[] = [];
+  let truncated = false;
+  let lastYield = Date.now();
+  for (let i = 0; i < candidates.length; i++) {
+    if (results.length >= MAX_SESSION_SEARCH_RESULTS) {
+      truncated = i < candidates.length; // 上限已满且还有候选没扫 → 截断
+      break;
+    }
+    if (Date.now() - lastYield > SCAN_YIELD_MS) {
+      await new Promise<void>((r) => setImmediate(r));
+      lastYield = Date.now();
+    }
+    const c = candidates[i];
+    try {
+      const ht = readHeadTail(c.file);
+      if (!ht) continue; // 空文件 / 读取失败
+      const meta = sessionMetaFromLite(ht.head, ht.tail, c.sessionId, Math.round(ht.mtime));
+      if (!meta) continue; // 侧链 / 纯元数据会话，与列表同口径不展示
+      // 标题或摘要命中。「未命名会话」占位标题不做标题召回（见函数注释），摘要命中不受影响
+      const titleMatched =
+        meta.title !== "未命名会话" && meta.title.toLowerCase().includes(kw);
+      const summaryMatched = meta.summary.toLowerCase().includes(kw);
+      if (titleMatched || summaryMatched) {
+        meta.file = c.file;
+        results.push({ ...meta, projectPath: c.projectPath });
+      }
+    } catch {
+      continue; // 单文件竞态（枚举后被删 / 清回收站），不击穿全局搜索
+    }
+  }
+  return { results, truncated };
 }
 
 // ----------------------------------------------------------------------------

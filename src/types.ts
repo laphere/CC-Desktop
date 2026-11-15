@@ -93,6 +93,14 @@ export interface PinnedSessionInfo extends SessionInfo {
   projectPath: string;
 }
 
+/** 顶栏全局会话搜索返回（后端 session-extra.ts searchSessions；结果条目即置顶区
+ *  同款元数据）。results 按 lastModified 倒序、最多 50 条；truncated=true = 上限已
+ *  满且仍有候选未扫（未扫者未必命中），截断发生在全局排序之后 */
+export interface SessionSearchOutcome {
+  results: PinnedSessionInfo[];
+  truncated: boolean;
+}
+
 /** 回收站中的会话备份（删除 = 移入回收站，可恢复） */
 export interface TrashedSession {
   /** 备份文件绝对路径（恢复/永久删除时回传） */

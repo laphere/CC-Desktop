@@ -72,6 +72,7 @@ import {
   listPinnedSessions,
   purgeClaudeProjectData,
   searchSessionMessages,
+  searchSessions,
 } from "./backend/session-extra";
 import {
   deleteSessionFile,
@@ -518,6 +519,17 @@ function registerIpc(): void {
   handle("session_stats", (p) => sessionStats(String(p.file), projectsDir()));
   handle("search_session_messages", (p) =>
     searchSessionMessages(String(p.file), String(p.keyword), projectsDir()));
+  handle("search_sessions", async (p) => {
+    // 搜索范围与左栏口径一致：可见项目 = 扫描 ∪ 手动添加 − 排除清单（与
+    // list_projects 同源；config 只读一次，不继承旧 handler 连读两次的写法）
+    const cfg = loadConfig(rootDir());
+    const projects = listProjects(projectsDir(), cfg.projects, cfg.excluded);
+    return searchSessions(
+      projectsDir(),
+      String(p.keyword),
+      projects.map((x) => x.path),
+    );
+  });
   handle("get_session_user_prompts", (p) => getSessionUserPrompts(String(p.file), projectsDir()));
   handle("export_session", (p) =>
     exportSession(String(p.file), String(p.destPath), String(p.format), projectsDir()));

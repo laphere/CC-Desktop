@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { SessionInfo } from "../types";
 import { PinIcon } from "./Icons";
 
@@ -9,10 +10,33 @@ interface Props {
   active: boolean;
   /** 置顶区里显示的所属项目名（项目内部会话列表不传） */
   projectName?: string;
+  /** 搜索结果行的关键词高亮（标题用；空串/不传 = 不高亮，列表常态）。
+   *  ⚠️ 归一口径必须与后端 normalizeKeyword（electron/backend/session-extra.ts）
+   *  逐字同步：trim + 连续空白折叠单空格 + lowercase，否则「命中不亮」/错位 */
+  highlight?: string;
   onOpen: () => void;
   onTogglePin: () => void;
   /** 会话行右键菜单（终端继续/重命名/置顶/删除收进菜单，行上不放按钮挤占标题宽度） */
   onContextMenu: (x: number, y: number) => void;
+}
+
+/** 关键词高亮：大小写不敏感的字面子串切分。不用正则——关键词含正则元字符
+ *  （括号、点号等）也能安全高亮，与后端 indexOf 的匹配语义逐字一致 */
+export function highlightKeyword(text: string, kw: string | undefined): ReactNode {
+  const k = (kw ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+  if (k === "") return text;
+  const lower = text.toLowerCase();
+  if (!lower.includes(k)) return text;
+  const parts: ReactNode[] = [];
+  let i = 0;
+  let key = 0;
+  for (let idx = lower.indexOf(k); idx !== -1; idx = lower.indexOf(k, i)) {
+    if (idx > i) parts.push(text.slice(i, idx));
+    parts.push(<mark key={key++}>{text.slice(idx, idx + k.length)}</mark>);
+    i = idx + k.length;
+  }
+  if (i < text.length) parts.push(text.slice(i));
+  return parts;
 }
 
 /** 相对时间：刚刚 / x 分钟前 / x 小时前 / 昨天 / MM-DD HH:mm */
@@ -27,12 +51,13 @@ export function formatTime(ms: number): string {
   return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-/** 单条会话行：置顶聚合区专用（项目内会话列表为内联行） */
+/** 单条会话行：置顶聚合区 / 搜索结果区专用（项目内会话列表为内联行） */
 export default function SessionRow({
   session,
   pinned,
   active,
   projectName,
+  highlight,
   onOpen,
   onTogglePin,
   onContextMenu,
@@ -63,7 +88,7 @@ export default function SessionRow({
       <div className="session-body">
         <div className="session-title">
           {projectName && <span className="session-project">{projectName}</span>}
-          {session.title}
+          {highlightKeyword(session.title, highlight)}
         </div>
         <div className="session-meta">
           {formatTime(session.lastModified)}

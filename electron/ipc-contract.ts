@@ -95,6 +95,13 @@ export interface IpcContract {
   get_session_messages: { file: string; offset?: number };
   session_stats: { file: string };
   search_session_messages: { file: string; keyword: string };
+  /** 顶栏全局会话搜索（跨项目；只搜**标题/摘要**，不扫正文——内容级搜索由会话页
+   *  内的 search_session_messages 承担）。返回 SessionSearchOutcome：results 按
+   *  lastModified 倒序、最多 50 条（截断发生在全局排序之后，truncated=true = 还有
+   *  更旧的没扫/没列）；每条 result 的 projectPath 是**真实项目路径**（非 mangled
+   *  目录名），title 语义与左栏列表同一兜底链（customTitle > aiTitle > 首条用户
+   *  消息），正在起名的会话不过滤（有意口径） */
+  search_sessions: { keyword: string };
   get_session_user_prompts: { file: string };
   export_session: { file: string; destPath: string; format: string };
   get_usage_stats: { tzOffsetMinutes: number };
@@ -267,6 +274,7 @@ export const IPC_CHANNELS = [
   "get_session_messages",
   "session_stats",
   "search_session_messages",
+  "search_sessions",
   "get_session_user_prompts",
   "export_session",
   "get_usage_stats",

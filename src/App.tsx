@@ -17,6 +17,7 @@ import type {
   Project,
   ProviderListState,
   SessionInfo,
+  SessionSearchOutcome,
   TabActivity,
   TerminalTab,
 } from "./types";
@@ -24,6 +25,7 @@ import Header from "./components/Header";
 import { MessageCircleIcon, SearchIcon, XIcon } from "./components/Icons";
 import ProjectList from "./components/ProjectList";
 import PinnedSessions from "./components/PinnedSessions";
+import SessionSearchResults, { type SessionSearchPhase } from "./components/SessionSearchResults";
 import ContextMenu from "./components/ContextMenu";
 import { animateModalClose, MODAL_EXIT_MS } from "./components/Modal";
 import NewLauncherDialog from "./components/NewLauncherDialog";
@@ -193,6 +195,16 @@ export default function App() {
   const [search, setSearch] = useState("");
   /** 左栏搜索框是否展开（搜索入口收进了顶栏「搜索」按钮） */
   const [searchOpen, setSearchOpen] = useState(false);
+  /** 顶栏搜索的会话结果（跨项目、标题/摘要口径；项目名过滤在 sorted 里做）。
+   *  results 是后端快照，重命名/删除后靠 sessionDataVersion 驱动重搜刷新 */
+  const [sessionHits, setSessionHits] = useState<SessionSearchOutcome>({
+    results: [],
+    truncated: false,
+  });
+  const [sessionSearchPhase, setSessionSearchPhase] = useState<SessionSearchPhase>("idle");
+  /** 会话数据版本：重命名/删除会话成功后 +1，让当前关键词的搜索重跑——结果里的
+   *  标题/存在性是快照，不重跑会停留在旧标题、列出已删会话 */
+  const [sessionDataVersion, setSessionDataVersion] = useState(0);
   /** 左栏项目列表是否收起（收起后内容区占满全宽，仅内存态不落盘） */
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   /** 收/放滑行相位（null = 静止）：驱动 .main-left-overlay——必须走 React state，
@@ -794,13 +806,9 @@ export default function App() {
   // ---------- 列表派生数据 ----------
 
   const sorted = useMemo(() => {
+    // 搜索只按项目名过滤：路径匹配移除（没啥用），会话搜索由顶栏搜索的会话档负责
     const q = search.trim().toLowerCase();
-    const filtered = items.filter(
-      (l) =>
-        !q ||
-        l.name.toLowerCase().includes(q) ||
-        l.path.toLowerCase().includes(q),
-    );
+    const filtered = items.filter((l) => !q || l.name.toLowerCase().includes(q));
     // 按 order 数组顺序渲染（未收录的新项目按名称追加在后）
     const byKey = new Map(filtered.map((l) => [l.key, l]));
     const knownKeys = new Set(order);
@@ -822,6 +830,53 @@ export default function App() {
     if (searchOpen) setSearch("");
     setSearchOpen(!searchOpen);
   }, [searchOpen]);
+
+  // ---------- 顶栏会话搜索（跨项目；两段式并行） ----------
+
+  /** 上一帧搜索词（trim 后）：空→非空的跳变 = 搜索开始，滚回列表顶部让结果区头可见 */
+  const prevSearchRef = useRef("");
+
+  useEffect(() => {
+    const kw = search.trim();
+    const started = kw !== "" && prevSearchRef.current === "";
+    prevSearchRef.current = kw;
+    if (started) {
+      // 结果区顶在 .left-scroll 顶部；此前滚在列表深处的话看不到区头与先行命中
+      leftScrollRef.current?.scrollTo({ top: 0 });
+    }
+    if (!kw) {
+      setSessionHits({ results: [], truncated: false });
+      setSessionSearchPhase("idle");
+      return;
+    }
+    // 竞态守卫与查看器搜索同一套（cancelled 闭包）：effect 每次运行（关键词变化 /
+    // 数据版本变化 / 收起清空）都作废在途回包，不区分空与非空——清空后迟到的搜索
+    // 回包同样必须被丢弃，否则重新输入时旧命中会闪现
+    let cancelled = false;
+    // 旧命中驻留不清空（与查看器搜索同款）：关键词微调 / 数据版本刷新时列表保留
+    // 上一轮结果，新回包到达才整体替换——每键清空会让结果区闪空、命中行反复重播
+    // 进场动画
+    setSessionSearchPhase("searching");
+    const t = window.setTimeout(() => {
+      api
+        .searchSessions(kw)
+        .then((r) => {
+          if (cancelled) return;
+          setSessionHits(r);
+          setSessionSearchPhase("done");
+        })
+        .catch(() => {
+          if (cancelled) return;
+          // 驻留的上一关键词结果无法为当前词背书，清掉再报错
+          setSessionHits({ results: [], truncated: false });
+          setSessionSearchPhase("error");
+        });
+    }, 300);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(t);
+    };
+  }, [search.trim(), sessionDataVersion]);
 
   // ---------- 操作 ----------
 
@@ -971,6 +1026,7 @@ export default function App() {
         }
       }
       await refreshPinned(); // 置顶区标题同步
+      setSessionDataVersion((v) => v + 1); // 搜索结果快照重搜（若搜索进行中，旧标题不残留）
       showToast("已重命名");
     },
     [renameTarget, expandedKey, items, refreshPinned, showToast],
@@ -1230,6 +1286,7 @@ export default function App() {
         // 置顶条目**保留**（后端亦然）：文件只是进了回收站，恢复回原路径即自动复活，
         // 此处重拉后该会话因文件缺失暂时从置顶区消失
         await refreshPinned();
+        setSessionDataVersion((v) => v + 1); // 搜索结果重搜，已删会话不再列在结果里
         showToast(`已删除「${session.title}」，可在回收站恢复`);
       } catch (e) {
         showToast("删除失败：" + String(e));
@@ -1772,7 +1829,7 @@ export default function App() {
               </span>
               <input
                 className="search-input"
-                placeholder="搜索项目名或路径…"
+                placeholder="搜索项目名与会话…"
                 value={search}
                 autoFocus
                 spellCheck={false}
@@ -1789,17 +1846,34 @@ export default function App() {
             </div>
           )}
           <div className="left-scroll" ref={leftScrollRef}>
-            <PinnedSessions
-            items={pinnedMeta}
-            search={search}
-            activeSessionFile={activeSessionFile}
-            projects={items}
-            onOpenSession={continueSessionTab}
-            onTogglePin={togglePin}
-            onSessionContextMenu={(x, y, key, session) =>
-              setSessionMenu({ x, y, key, session })
-            }
-          />
+            {search.trim() === "" ? (
+              <PinnedSessions
+                items={pinnedMeta}
+                activeSessionFile={activeSessionFile}
+                projects={items}
+                onOpenSession={continueSessionTab}
+                onTogglePin={togglePin}
+                onSessionContextMenu={(x, y, key, session) =>
+                  setSessionMenu({ x, y, key, session })
+                }
+              />
+            ) : (
+              /* 搜索期间置顶区让位：全局会话命中里已含置顶会话，两处重复显示只会打架 */
+              <SessionSearchResults
+                results={sessionHits.results}
+                truncated={sessionHits.truncated}
+                phase={sessionSearchPhase}
+                keyword={search.trim()}
+                activeSessionFile={activeSessionFile}
+                projects={items}
+                pinnedFiles={pinnedFiles}
+                onOpenSession={continueSessionTab}
+                onTogglePin={togglePin}
+                onSessionContextMenu={(x, y, key, session) =>
+                  setSessionMenu({ x, y, key, session })
+                }
+              />
+            )}
           <ProjectList
             items={sorted}
             pinnedFiles={pinnedFiles}

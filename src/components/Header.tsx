@@ -92,7 +92,7 @@ export default function Header({
           <button
             className={`icon-btn ${searchOpen ? "icon-btn-on" : ""}`}
             onClick={onToggleSearch}
-            title="搜索项目名或路径"
+            title="搜索项目名与会话"
           >
             <SearchIcon size={15} />
           </button>
