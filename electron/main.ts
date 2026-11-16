@@ -116,7 +116,6 @@ import {
   writeClaudeMd,
 } from "./backend/ccassets";
 import { cleanDiskBucket, diskUsage } from "./backend/ccdisk";
-import { listPromptHistory } from "./backend/cchistory";
 import { readCcState, writeCcState } from "./backend/ccstate";
 import type { IpcContract } from "./ipc-contract";
 
@@ -882,11 +881,6 @@ function registerIpc(): void {
   handle("cc_disk_clean", (p) =>
     cleanDiskBucket(claudeConfigDir(), rootDir(), String(p.bucket ?? "")),
   );
-  handle("cc_history_list", (p) =>
-    listPromptHistory(claudeConfigDir(), {
-      limit: typeof p.limit === "number" ? p.limit : undefined,
-      search: typeof p.search === "string" ? p.search : undefined,
-    }));
 }
 
 // ---------------- userData 隔离 ----------------

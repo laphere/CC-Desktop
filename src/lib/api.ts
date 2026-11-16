@@ -24,7 +24,6 @@ import type {
   McpScope,
   PermissionRules,
   PluginListView,
-  PromptHistoryResult,
 } from "../../electron/ipc-contract";
 import { Channel } from "./channel";
 import type {
@@ -398,6 +397,4 @@ export const api = {
     invoke<string>("cc_claudemd_write", { scope, content, ...(projectPath ? { projectPath } : {}) }),
   ccDiskUsage: () => invoke<DiskUsage>("cc_disk_usage"),
   ccDiskClean: (bucket: string) => invoke<CleanResult>("cc_disk_clean", { bucket }),
-  ccHistoryList: (opts?: { limit?: number; search?: string }) =>
-    invoke<PromptHistoryResult>("cc_history_list", opts ?? {}),
 };
