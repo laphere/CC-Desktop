@@ -1,6 +1,6 @@
 // 设置中心「配置」域页面：权限规则 / Hooks / CLAUDE.md / 磁盘占用。
 // 写路径全部即时落盘（单条增删 = 一次小写入），失败 toast + 重读。
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { PencilIcon, XIcon } from "../Icons";
 import { animateModalClose } from "../Modal";
 import ConfirmDialog from "../ConfirmDialog";
@@ -211,11 +211,14 @@ function editingMultiCommand(entry: unknown): boolean {
 function HookEditForm({
   initial,
   extraHint,
+  busy,
   onSave,
   onCancel,
 }: {
   initial: { event: string; matcher: string; command: string } | null;
   extraHint?: string | null;
+  /** 有保存/停用等操作在飞：禁掉提交，避免连点把上一次写回的结果又改掉 */
+  busy?: boolean;
   onSave: (v: { event: string; matcher: string; command: string }) => void;
   onCancel: () => void;
 }) {
@@ -244,10 +247,15 @@ function HookEditForm({
       </div>
       {extraHint && <Hint>{extraHint}</Hint>}
       <div className="cc-form-acts">
-        <button type="button" className="btn btn-sm btn-primary" onClick={() => onSave({ event, matcher: matcher.trim(), command: command.trim() })}>
+        <button
+          type="button"
+          className="btn btn-sm btn-primary"
+          disabled={busy}
+          onClick={() => onSave({ event, matcher: matcher.trim(), command: command.trim() })}
+        >
           保存
         </button>
-        <button type="button" className="btn btn-sm" onClick={onCancel}>
+        <button type="button" className="btn btn-sm" disabled={busy} onClick={onCancel}>
           取消
         </button>
       </div>
@@ -273,6 +281,11 @@ export function HooksPage({ scope, projectPath, onToast }: { scope: CcScope; pro
     [projectPath],
   );
   const [editing, setEditing] = useState<HookRow | "new" | null>(null);
+  /** 有写入在飞：禁用全部操作并拦住新操作。
+   *  只防「连点把上一次写回的结果又改掉」——`persist` 期间进来的第二次写会用
+   *  旧快照覆盖新状态（last-op-wins 回退），所以入口拦截与按钮禁用必须成对。 */
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
 
   // scope/projectPath 切换必须清编辑态：editing 里攥着旧 scope 的 idx 与条目，
   // 不清的话保存会把旧 scope 的下标套到新 scope 的表上，改错/删错条目
@@ -299,6 +312,9 @@ export function HooksPage({ scope, projectPath, onToast }: { scope: CcScope; pro
   const disabledIds = new Set(disabledEntries.map((d) => d.id));
 
   const persist = async (map: HooksMap, disabledNext: DisabledHookEntry[]) => {
+    if (savingRef.current) return;
+    savingRef.current = true;
+    setSaving(true);
     try {
       // 契约口径：disabled 是**全局**停用条目全集（ccstate 整份写回）。这里只管
       // 当前 scope 的那份，其他 scope 的暂存条目必须原样带上——被停用条目已从
@@ -309,11 +325,15 @@ export function HooksPage({ scope, projectPath, onToast }: { scope: CcScope; pro
     } catch (e) {
       onToast?.(`保存 Hooks 失败：${String(e)}`);
       reload();
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
     }
   };
 
   /** 停用 = 从表移出、完整条目进停用暂存（ccstate.json 持久，重启不复活） */
   const disable = (row: HookRow) => {
+    if (savingRef.current) return;
     const map: HooksMap = { ...hooks };
     map[row.event] = (map[row.event] ?? []).filter((_, i) => i !== row.idx);
     if ((map[row.event] ?? []).length === 0) delete map[row.event];
@@ -322,11 +342,13 @@ export function HooksPage({ scope, projectPath, onToast }: { scope: CcScope; pro
   };
   /** 启用 = 停用暂存里的原条目移回表（内容存在 ccstate，跨会话都能还原） */
   const enable = (d: DisabledHookEntry) => {
+    if (savingRef.current) return;
     const next = disabledEntries.filter((x) => x.id !== d.id);
     const map: HooksMap = { ...hooks, [d.event]: [...(hooks[d.event] ?? []), d.entry] };
     void persist(map, next);
   };
   const remove = (row: HookRow) => {
+    if (savingRef.current) return;
     if (!confirm(`删除 ${row.event} 的这条 Hook？命令：${row.command}`)) return;
     const map: HooksMap = { ...hooks };
     map[row.event] = (map[row.event] ?? []).filter((_, i) => i !== row.idx);
@@ -343,8 +365,10 @@ export function HooksPage({ scope, projectPath, onToast }: { scope: CcScope; pro
       {editing === "new" && (
         <HookEditForm
           initial={null}
+          busy={saving}
           onCancel={() => setEditing(null)}
           onSave={({ event, matcher, command }) => {
+            if (savingRef.current) return;
             setEditing(null);
             if (!command) return;
             const entry: Record<string, unknown> = { hooks: [{ type: "command", command }] };
@@ -358,8 +382,10 @@ export function HooksPage({ scope, projectPath, onToast }: { scope: CcScope; pro
         <HookEditForm
           initial={{ event: editing.event, matcher: editing.matcher ?? "", command: editing.command }}
           extraHint={editingMultiCommand(editing.raw) ? "该条目含多条命令，保存只替换第一条；其余命令原样保留（整串调整请走 Claude Code 的 /hooks）" : null}
+          busy={saving}
           onCancel={() => setEditing(null)}
           onSave={({ event, matcher, command }) => {
+            if (savingRef.current) return;
             const target = editing as HookRow;
             setEditing(null);
             if (!command) return;
@@ -386,7 +412,12 @@ export function HooksPage({ scope, projectPath, onToast }: { scope: CcScope; pro
 
       <H3
         right={
-          <button type="button" className="btn btn-sm btn-primary" onClick={() => setEditing("new")}>
+          <button
+            type="button"
+            className="btn btn-sm btn-primary"
+            disabled={saving}
+            onClick={() => setEditing("new")}
+          >
             新增 Hook
           </button>
         }
@@ -410,11 +441,23 @@ export function HooksPage({ scope, projectPath, onToast }: { scope: CcScope; pro
               sub={<span className="mono">{r.command}</span>}
               ops={
                 <>
-                  <Toggle on title="停用（暂存，可再启用）" onClick={() => disable(r)} />
-                  <button type="button" className="icon-btn icon-btn-sm" title="编辑" onClick={() => setEditing(r)}>
+                  <Toggle on title="停用（暂存，可再启用）" disabled={saving} onClick={() => disable(r)} />
+                  <button
+                    type="button"
+                    className="icon-btn icon-btn-sm"
+                    title="编辑"
+                    disabled={saving}
+                    onClick={() => setEditing(r)}
+                  >
                     <PencilIcon size={11} />
                   </button>
-                  <button type="button" className="icon-btn icon-btn-sm cc-danger" title="删除" onClick={() => remove(r)}>
+                  <button
+                    type="button"
+                    className="icon-btn icon-btn-sm cc-danger"
+                    title="删除"
+                    disabled={saving}
+                    onClick={() => remove(r)}
+                  >
                     <XIcon size={11} />
                   </button>
                 </>
@@ -441,7 +484,7 @@ export function HooksPage({ scope, projectPath, onToast }: { scope: CcScope; pro
               }
               sub={<span className="mono">{r.command}</span>}
               ops={
-                <button type="button" className="btn btn-sm" onClick={() => enable(d)}>
+                <button type="button" className="btn btn-sm" disabled={saving} onClick={() => enable(d)}>
                   启用
                 </button>
               }
