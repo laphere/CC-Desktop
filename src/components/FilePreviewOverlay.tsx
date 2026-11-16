@@ -330,12 +330,7 @@ export default function FilePreviewOverlay({
         }}
       >
         {file.kind === "md" ? (
-          <div
-            className="fp-md-layout"
-            onMouseDown={(e) => {
-              if (e.target === e.currentTarget) close();
-            }}
-          >
+          <div className="fp-md-layout">
             {outline.length > 0 && (
               <aside
                 className={outlineCollapsed ? "fp-outline collapsed" : "fp-outline"}

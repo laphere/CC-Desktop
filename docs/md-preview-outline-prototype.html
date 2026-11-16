@@ -146,28 +146,29 @@
   /* ---- 内容区 .fp-stage：inset = titlebar+54 / 16 ---- */
   #frame .fp-stage { position: absolute; top: 98px; left: 16px; right: 16px; bottom: 16px; display: flex; align-items: stretch; }
 
-  /* ★ 新增：md 态双栏布局——大纲卡（240px）+ 正文卡并排 */
+  /* ★ 新增：md 态双栏——整块一张面板（底色/圆角/阴影在此），目录与正文之间
+     只用 1px 分隔线划开；分层沿用 app 左栏语义：目录 --bg、正文 --panel */
+  #frame .fp-md-layout { display: flex; align-items: stretch; width: 100%; min-width: 0; background: var(--panel); border-radius: 12px; box-shadow: var(--shadow); overflow: hidden; }
+
   #frame .fp-outline {
     flex: 0 0 auto;
-    width: 240px;
-    margin-right: 12px;
-    background: var(--panel);
-    border-radius: 12px;
-    box-shadow: var(--shadow);
+    width: 360px;
+    background: var(--bg);
+    border-right: 1px solid var(--border);
     overflow: hidden;
     opacity: 1;
     visibility: visible;
     /* visibility 双向非对称：展开立即可见（0s），收起等动画播完再隐藏（delay）——
        否则展开动画全程不可见 / 收起后键盘仍可聚焦残留条目 */
-    transition: width var(--dur-slow) var(--ease-emph), margin-right var(--dur-slow) var(--ease-emph), opacity var(--dur-slow) var(--ease-emph), visibility 0s;
+    transition: width var(--dur-slow) var(--ease-emph), opacity var(--dur-slow) var(--ease-emph), visibility 0s;
   }
   #frame .fp-outline.collapsed {
-    width: 0; margin-right: 0; opacity: 0; visibility: hidden; pointer-events: none;
-    transition: width var(--dur-slow) var(--ease-emph), margin-right var(--dur-slow) var(--ease-emph), opacity var(--dur-slow) var(--ease-emph), visibility 0s var(--dur-slow);
+    width: 0; border-right-width: 0; opacity: 0; visibility: hidden; pointer-events: none;
+    transition: width var(--dur-slow) var(--ease-emph), opacity var(--dur-slow) var(--ease-emph), visibility 0s var(--dur-slow);
   }
   #frame .fp-outline[hidden] { display: none; }
   /* 内层定宽不重排（抽屉模式）：折叠只裁外层，大纲条目本身不折行 */
-  #frame .fp-outline-inner { position: relative; width: 240px; height: 100%; overflow-y: auto; padding: 10px 8px; }
+  #frame .fp-outline-inner { position: relative; width: 360px; height: 100%; overflow-y: auto; padding: 10px 8px; }
 
   #frame .fp-outline-item {
     display: block; width: 100%; text-align: left;
@@ -181,10 +182,9 @@
      accent 只有 ~3.6:1（双主题都不达 AA），accent-hover 4.78/4.54 过线，与 .icon-btn-on 同口径 */
   #frame .fp-outline-item.active { background: var(--accent-soft); color: var(--accent-hover); font-weight: 600; }
 
-  /* ---- 正文卡：与现状一致（面板满宽 + 版心居中） ---- */
+  /* ---- 正文区：面板的底色/圆角/阴影在 .fp-md-layout 上，这里只管滚动与内边距 ---- */
   #frame .fp-md-card {
     flex: 1; min-width: 0;
-    background: var(--panel); border-radius: 12px; box-shadow: var(--shadow);
     padding: 26px 30px; overflow-y: auto;
     user-select: text;
   }
@@ -243,11 +243,13 @@
             <button class="fp-btn fp-icon-only" title="关闭（Esc）"><span data-icon="x" data-size="15"></span></button>
           </div>
           <div class="fp-stage">
-            <aside class="fp-outline" id="fp-outline">
-              <div class="fp-outline-inner" id="fp-outline-list"></div>
-            </aside>
-            <div class="fp-md-card" id="fp-md-card">
-              <div class="md-body" id="md-body"></div>
+            <div class="fp-md-layout">
+              <aside class="fp-outline" id="fp-outline">
+                <div class="fp-outline-inner" id="fp-outline-list"></div>
+              </aside>
+              <div class="fp-md-card" id="fp-md-card">
+                <div class="md-body" id="md-body"></div>
+              </div>
             </div>
           </div>
         </div>
@@ -267,8 +269,8 @@
 
     <div class="decisions">
       <div class="decision">
-        <h3><span data-icon="panel" data-size="14"></span>双栏同面卡</h3>
-        <p>大纲卡与正文卡同用 <code>--panel</code> surface（radius 12 + shadow），<code>gap 12</code> 并排；正文版心（92%、上限 1240px）照旧居中，折叠后自动回到满宽。</p>
+        <h3><span data-icon="panel" data-size="14"></span>一体面板 + 细分隔线</h3>
+        <p>目录与正文是同一张面板（<code>radius 12</code> + shadow 在整块上），中间只留 1px <code>--border</code> 竖线；分层照 app 左栏：目录 <code>--bg</code>、正文 <code>--panel</code>。目录 360px 与项目列表同宽，正文版心（92%、上限 1240px）照旧居中，折叠后自动回到满宽。</p>
       </div>
       <div class="decision">
         <h3><span data-icon="wcoMax" data-size="14"></span>宽度阈值与迟滞</h3>
@@ -293,7 +295,7 @@
     </div>
 
     <p class="footnote">
-      实施落点：<code>src/components/FilePreviewOverlay.tsx</code>（大纲提取 / scrollspy / 开关 / 宽度自适应）+ <code>src/styles.css</code>（<code>.fp-outline*</code> 追加在 fp-* 块后）。阈值常量 <code>OUTLINE_COLLAPSE_BELOW = 1080</code> / <code>OUTLINE_EXPAND_ABOVE = 1120</code>，参考线 96px、跳转留白 44px、大纲宽 240px——实施评审时可再调。大纲收集 h1–h6（演示文档只到 h4），缩进按「层级 − 最小层级」clamp 0–4。
+      实施落点：<code>src/components/FilePreviewOverlay.tsx</code>（大纲提取 / scrollspy / 开关 / 宽度自适应）+ <code>src/styles.css</code>（<code>.fp-outline*</code> 追加在 fp-* 块后）。阈值常量 <code>OUTLINE_COLLAPSE_BELOW = 1080</code> / <code>OUTLINE_EXPAND_ABOVE = 1120</code>，参考线 96px、跳转留白 44px、大纲宽 360px（与项目列表同宽）——实施评审时可再调。大纲收集 h1–h6（演示文档只到 h4），缩进按「层级 − 最小层级」clamp 0–4。
     </p>
   </div>
 

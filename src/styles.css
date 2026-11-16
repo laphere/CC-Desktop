@@ -3909,12 +3909,10 @@ html.ctrl-links .md-body a {
 
 .fp-md-card {
   /* 占满 .fp-md-layout 里除大纲外的剩余空间（与 .fp-html-card 同款最大化处理），
-     正文列在卡内收成可读版心居中——prose 拉满没法读，满宽的是「面板」不是文本 */
+     正文列在卡内收成可读版心居中——prose 拉满没法读，满宽的是「面板」不是文本。
+     面板的底色/圆角/阴影都在 .fp-md-layout 上，这里只负责滚动与内边距 */
   flex: 1;
   min-width: 0;
-  background: var(--panel);
-  border-radius: 12px;
-  box-shadow: var(--shadow);
   padding: 26px 30px;
   overflow-y: auto;
   /* 覆盖 body 的 user-select: none，允许选择复制预览内容（同会话内容区的局部放行） */
@@ -3943,44 +3941,48 @@ html.ctrl-links .md-body a {
   background: #fff;
 }
 
-/* ---- md 态左侧大纲（Typora 式双栏）：与正文卡同 surface，折叠走「抽屉」模式 ----
-   外层 width/margin 收 0 + 裁切 + visibility 收尾，内层定宽不重排；单文档重折行
-   成本可接受（与会话左栏禁 basis 动画的数百消息+终端场景不同）。visibility 双向
-   非对称：展开立即可见（0s delay），收起等动画播完再隐藏——否则展开动画全程
-   不可见、收起后残留条目仍可 Tab 聚焦 */
+/* ---- md 态左侧大纲（Typora 式双栏）：整块是一张面板，目录栏与正文之间只用
+   1px 分隔线划开（两块浮卡各带圆角/阴影会在中间露出遮罩黑缝，视觉上像两个东西）。
+   分层沿用 app 自己的左栏语义：目录 --bg、正文 --panel、界线 --border。
+   折叠走「抽屉」模式：目录栏 width 收 0 + 裁切 + visibility 收尾，内层定宽不重排；
+   单文档重折行成本可接受（与会话左栏禁 basis 动画的数百消息+终端场景不同）。
+   visibility 双向非对称：展开立即可见（0s delay），收起等动画播完再隐藏——否则
+   展开动画全程不可见、收起后残留条目仍可 Tab 聚焦 */
 .fp-md-layout {
   display: flex;
   align-items: stretch;
   width: 100%;
   min-width: 0;
+  background: var(--panel);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
 }
 
 .fp-outline {
   flex: 0 0 auto;
   width: 360px; /* 与左栏项目列表同宽（对齐观感） */
-  margin-right: 12px;
-  background: var(--panel);
-  border-radius: 12px;
-  box-shadow: var(--shadow);
+  background: var(--bg);
+  /* 分隔线画在目录栏右缘。折叠态要把 border-width 也归零：border-box 下 width:0
+     压不住边框，留 1px 会让正文区永远少 1px（颜色转透明只是看不见，仍占位） */
+  border-right: 1px solid var(--border);
   overflow: hidden;
   opacity: 1;
   visibility: visible;
   transition:
     width var(--dur-slow) var(--ease-emph),
-    margin-right var(--dur-slow) var(--ease-emph),
     opacity var(--dur-slow) var(--ease-emph),
     visibility 0s;
 }
 
 .fp-outline.collapsed {
   width: 0;
-  margin-right: 0;
+  border-right-width: 0;
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
   transition:
     width var(--dur-slow) var(--ease-emph),
-    margin-right var(--dur-slow) var(--ease-emph),
     opacity var(--dur-slow) var(--ease-emph),
     visibility 0s var(--dur-slow);
 }
