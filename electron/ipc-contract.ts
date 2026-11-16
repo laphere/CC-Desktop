@@ -12,7 +12,7 @@ import type { DisabledHookEntry } from "./backend/ccstate";
 import type { McpListView, McpScope, McpServerView } from "./backend/ccmcp";
 import type { PluginListView } from "./backend/ccplugins";
 import type { AssetKind, AssetScope, AssetView, ClaudeMdView } from "./backend/ccassets";
-import type { DiskUsage } from "./backend/ccdisk";
+import type { CleanResult, DiskUsage } from "./backend/ccdisk";
 import type { PromptHistoryEntry, PromptHistoryResult } from "./backend/cchistory";
 
 // cc 系视图类型在此再导出：渲染层统一从本契约表拿类型（与通道面同源）
@@ -31,6 +31,7 @@ export type {
   AssetView,
   ClaudeMdView,
   DiskUsage,
+  CleanResult,
   PromptHistoryEntry,
   PromptHistoryResult,
 };
@@ -269,6 +270,8 @@ export interface IpcContract {
   cc_disk_usage: void;
   /** 提示词历史（~/.claude/history.jsonl），倒序 + 搜索 + limit */
   cc_history_list: { limit?: number; search?: string };
+  /** 清理可清理桶（白名单见 ccdisk.CLEANABLE_BUCKETS），返回清掉的字节数 */
+  cc_disk_clean: { bucket: string };
 }
 
 export type IpcChannel = keyof IpcContract;
@@ -373,6 +376,7 @@ export const IPC_CHANNELS = [
   "cc_claudemd_write",
   "cc_disk_usage",
   "cc_history_list",
+  "cc_disk_clean",
 ] as const;
 
 // ---------------- 白名单与契约的双向断言（编译期） ----------------

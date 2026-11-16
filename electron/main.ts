@@ -115,7 +115,7 @@ import {
   readClaudeMd,
   writeClaudeMd,
 } from "./backend/ccassets";
-import { diskUsage } from "./backend/ccdisk";
+import { cleanDiskBucket, diskUsage } from "./backend/ccdisk";
 import { listPromptHistory } from "./backend/cchistory";
 import { readCcState, writeCcState } from "./backend/ccstate";
 import type { IpcContract } from "./ipc-contract";
@@ -879,6 +879,9 @@ function registerIpc(): void {
       typeof p.content === "string" ? p.content : "",
     ));
   handle("cc_disk_usage", () => diskUsage(claudeConfigDir(), rootDir()));
+  handle("cc_disk_clean", (p) =>
+    cleanDiskBucket(claudeConfigDir(), rootDir(), String(p.bucket ?? "")),
+  );
   handle("cc_history_list", (p) =>
     listPromptHistory(claudeConfigDir(), {
       limit: typeof p.limit === "number" ? p.limit : undefined,

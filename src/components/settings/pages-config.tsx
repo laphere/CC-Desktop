@@ -2,6 +2,8 @@
 // 写路径全部即时落盘（单条增删 = 一次小写入），失败 toast + 重读。
 import { useEffect, useMemo, useState } from "react";
 import { PencilIcon, XIcon } from "../Icons";
+import { animateModalClose } from "../Modal";
+import ConfirmDialog from "../ConfirmDialog";
 import { api } from "../../lib/api";
 import type {
   AssetScope,
@@ -520,8 +522,42 @@ export const DISK_LABELS: Record<string, string> = {
   other: "其余数据",
 };
 
-export function DiskPage({ onOpenTrash }: { onOpenTrash: () => void }) {
-  const { data, error, loading } = useAsync<DiskUsage>(() => api.ccDiskUsage(), []);
+/** 各可清理桶的二次确认文案：写明「能重建 / 不可恢复」，让用户在点确认前知道后果 */
+const CLEAN_HINTS: Record<string, string> = {
+  "paste-cache": "清空粘贴缓存。纯本地缓存，CLI 会按需重建。",
+  "plugin-cache": "清空插件安装体缓存。已装插件不受影响，CLI 需要时会重新下载。",
+  "history-jsonl": "清空提示词历史（history.jsonl 截断为 0）。不可恢复。",
+  plans: "删除 plans 目录里的计划文档。不可恢复。",
+  "cc-assets-trash": "清空扩展资源回收站（技能/子代理/命令的删除备份）。不可恢复。",
+};
+
+export function DiskPage({
+  onOpenTrash,
+  onToast,
+}: {
+  onOpenTrash: () => void;
+  onToast?: (m: string) => void;
+}) {
+  const { data, error, loading, reload } = useAsync<DiskUsage>(() => api.ccDiskUsage(), []);
+  const [confirm, setConfirm] = useState<DiskUsage["buckets"][number] | null>(null);
+  const [cleaning, setCleaning] = useState(false);
+
+  const doClean = async () => {
+    if (!confirm) return;
+    const name = confirm.name;
+    setCleaning(true);
+    try {
+      const r = await api.ccDiskClean(name);
+      onToast?.(`已清理「${DISK_LABELS[name] ?? name}」，释放 ${fmtBytes(r.freed)}`);
+      setConfirm(null);
+      reload();
+    } catch (e) {
+      onToast?.(`清理失败：${String(e)}`);
+    } finally {
+      setCleaning(false);
+    }
+  };
+
   if (error) return <div className="cc-error">统计失败：{error}</div>;
   if (loading || !data) return <div className="cc-hint">统计中…（首次可能要几秒）</div>;
 
@@ -542,12 +578,23 @@ export function DiskPage({ onOpenTrash }: { onOpenTrash: () => void }) {
             <div className="cc-disk-bar">
               <div className="cc-disk-fill" style={{ width: `${pct}%` }} />
             </div>
-            {b.note && (
+            {(b.note || b.cleanable) && (
               <div className="cc-disk-l2">
-                <span className="cc-hint">{b.note}</span>
+                {b.note && <span className="cc-hint">{b.note}</span>}
                 {b.name === "sessions" && (
                   <button type="button" className="btn btn-sm" onClick={onOpenTrash}>
                     查看回收站
+                  </button>
+                )}
+                {b.cleanable && (
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    disabled={cleaning}
+                    onClick={() => setConfirm(b)}
+                    title={CLEAN_HINTS[b.name] ?? "清理该分桶"}
+                  >
+                    清理
                   </button>
                 )}
               </div>
@@ -555,7 +602,18 @@ export function DiskPage({ onOpenTrash }: { onOpenTrash: () => void }) {
           </div>
         );
       })}
-      <Hint>统计缓存 10 分钟；带清理动作的分桶在后续版本逐个开放。</Hint>
+      <Hint>统计缓存 10 分钟；会话数据请走回收站，其余可清理分桶见各行按钮。</Hint>
+
+      {confirm && (
+        <ConfirmDialog
+          title="清理分桶"
+          message={`确定清理「${DISK_LABELS[confirm.name] ?? confirm.name}」吗？${CLEAN_HINTS[confirm.name] ?? ""}`}
+          okText="清理"
+          danger
+          onCancel={() => animateModalClose(() => setConfirm(null))}
+          onOk={doClean}
+        />
+      )}
     </>
   );
 }

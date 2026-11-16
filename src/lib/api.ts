@@ -17,6 +17,7 @@ import type {
   CcPermsRead,
   CcScope,
   DisabledHookEntry,
+  CleanResult,
   DiskUsage,
   HooksMap,
   McpListView,
@@ -396,6 +397,7 @@ export const api = {
   ccClaudeMdWrite: (scope: AssetScope, content: string, projectPath?: string) =>
     invoke<string>("cc_claudemd_write", { scope, content, ...(projectPath ? { projectPath } : {}) }),
   ccDiskUsage: () => invoke<DiskUsage>("cc_disk_usage"),
+  ccDiskClean: (bucket: string) => invoke<CleanResult>("cc_disk_clean", { bucket }),
   ccHistoryList: (opts?: { limit?: number; search?: string }) =>
     invoke<PromptHistoryResult>("cc_history_list", opts ?? {}),
 };

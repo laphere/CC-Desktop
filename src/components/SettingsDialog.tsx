@@ -297,7 +297,7 @@ export default function SettingsDialog({
       case "claudemd":
         return <ClaudeMdPage scope={scope} projectPath={projectPath} onToast={onToast} />;
       case "disk":
-        return <DiskPage onOpenTrash={onOpenTrash} />;
+        return <DiskPage onOpenTrash={onOpenTrash} onToast={onToast} />;
     }
   })();
 

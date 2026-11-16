@@ -10,6 +10,8 @@ export interface DiskBucket {
   name: string;
   size: number;
   note?: string;
+  /** 是否可清理（由后端白名单判定后下发，前端据此显示清理按钮，不自行硬编码桶名） */
+  cleanable?: boolean;
 }
 
 export interface DiskUsage {
@@ -25,6 +27,65 @@ const CACHE = new Map<string, DiskUsage>();
 /** 清空用量缓存（单测用） */
 export function resetDiskUsageCache(): void {
   CACHE.clear();
+}
+
+function cacheKeyOf(cfgDir: string, appRoot: string): string {
+  return `${cfgDir}\u0000${appRoot}`;
+}
+
+/** 可清理桶白名单：只开放「删了能由 CLI 重建 / 或纯本地缓存」的桶。
+ *  ⚠️ `sessions`（会话 jsonl）一律不走这里——删除必须走回收站（可恢复）；
+ *  `file-history` 是「撤销本轮改动」的依赖、`marketplaces` 可能含未推的本地改动，
+ *  两者都**不开放**；`other` 是无界杂项，不猜。 */
+export const CLEANABLE_BUCKETS = [
+  "paste-cache",
+  "plugin-cache",
+  "history-jsonl",
+  "plans",
+  "cc-assets-trash",
+] as const;
+
+export type CleanableBucket = (typeof CLEANABLE_BUCKETS)[number];
+
+export interface CleanResult {
+  /** 清掉的字节数（清理前该桶大小） */
+  freed: number;
+}
+
+/** 桶 → 磁盘目标。目录类桶清理时**保留目录本身**、只删内容（CLI 预期目录存在）；
+ *  history-jsonl 是单文件，截断即可。 */
+function cleanTarget(
+  cfgDir: string,
+  appRoot: string,
+  bucket: CleanableBucket,
+): { kind: "dir" | "file"; path: string } {
+  const sub = (...p: string[]) => path.join(cfgDir, ...p);
+  switch (bucket) {
+    case "paste-cache":
+      return { kind: "dir", path: sub("paste-cache") };
+    case "plugin-cache":
+      return { kind: "dir", path: sub("plugins", "cache") };
+    case "plans":
+      return { kind: "dir", path: sub("plans") };
+    case "cc-assets-trash":
+      return { kind: "dir", path: path.join(appRoot, "trash", "cc-assets") };
+    case "history-jsonl":
+      return { kind: "file", path: sub("history.jsonl") };
+  }
+}
+
+/** 删目录**内容**（保留目录本身），符号链接跳过（不跟进、不删链接目标） */
+function cleanDirContents(dir: string): void {
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const e of entries) {
+    if (e.isSymbolicLink()) continue;
+    fs.rmSync(path.join(dir, e.name), { recursive: true, force: true });
+  }
 }
 
 /** 目录树字节数（apparent size）；root 缺失 = 0。符号链接一律跳过。 */
@@ -92,7 +153,7 @@ export async function diskUsage(
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<DiskUsage> {
   // 缓存键带上 appRoot：cc-assets 桶取自数据根，两个入参任一不同都不是同一份统计
-  const cacheKey = `${cfgDir}\u0000${appRoot}`;
+  const cacheKey = cacheKeyOf(cfgDir, appRoot);
   const hit = CACHE.get(cacheKey);
   if (hit && Date.now() - hit.computedAt < CACHE_TTL_MS) return hit;
 
@@ -124,6 +185,11 @@ export async function diskUsage(
   ];
   push("other", treeSizeNoOverlap(cfgDir, counted), "其余数据（缓存/指标/会话环境/旧备份等）");
 
+  // 可清理标记统一由后端白名单判定（前端不硬编码桶名，避免两处漂移）
+  for (const b of buckets) {
+    if (CLEANABLE_BUCKETS.includes(b.name as CleanableBucket)) b.cleanable = true;
+  }
+
   const usage: DiskUsage = {
     total: buckets.reduce((s, b) => s + b.size, 0),
     buckets,
@@ -131,4 +197,30 @@ export async function diskUsage(
   };
   CACHE.set(cacheKey, usage);
   return usage;
+}
+
+/** 清理一个可清理桶（白名单与理由见 CLEANABLE_BUCKETS）。
+ *  目录类桶只删内容、保留目录本身；history-jsonl 截断为 0。返回清掉的字节数。
+ *  ⚠️ 清完必须失效用量缓存，否则磁盘页会继续显示旧大小（TTL 最长 10 分钟）。 */
+export async function cleanDiskBucket(
+  cfgDir: string,
+  appRoot: string,
+  bucket: string,
+): Promise<CleanResult> {
+  if (!CLEANABLE_BUCKETS.includes(bucket as CleanableBucket)) {
+    throw new Error(`不允许清理的分桶：${bucket}`);
+  }
+  const target = cleanTarget(cfgDir, appRoot, bucket as CleanableBucket);
+  const before = target.kind === "dir" ? treeSize(target.path) : fileSize(target.path);
+  if (target.kind === "dir") {
+    cleanDirContents(target.path);
+  } else {
+    try {
+      fs.truncateSync(target.path, 0);
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+    }
+  }
+  CACHE.delete(cacheKeyOf(cfgDir, appRoot));
+  return { freed: before };
 }
