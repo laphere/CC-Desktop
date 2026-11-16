@@ -1,13 +1,16 @@
 # 设置与扩展中心（设置 Hub）实施方案
 
-> 状态：**Phase 1 已实施并过两轮评审**（2026-11-14 方案评审；2026-11-15 代码评审后端/前端各一，P0/P1 已修复，测试 537 ✓ + CDP 冒烟 30/30）· 交互原型：`docs/prototype/settings-hub.html`（高保真，视觉 token 逐值取自 `styles.css`）
+> 状态：**Phase 1 已实施并过两轮评审**（2026-11-14 方案评审；2026-11-15 代码评审后端/前端各一，P0/P1 已修复，测试 537 ✓ + CDP 冒烟 30/30）· **Phase 2 低风险批已落地（2026-11-16）**：提示词历史 tab / 磁盘分桶清理 / Hooks 保存期禁用 · 交互原型：`docs/prototype/settings-hub.html`（高保真，视觉 token 逐值取自 `styles.css`）
 > 目标：把 Claude Code 的插件 / MCP / 技能 / 子代理 / 命令 / 权限规则 / Hooks / CLAUDE.md 管理收进设置弹窗（左导航多页），外加磁盘占用体检。
 > 生效原理（已实测，方案成立的前提）：app 内对话层**不传 `settingSources`**（`chat.ts` 注释），CLI 默认加载 user+project+local 三层设置；终端会话天然读配置。**改文件 = 新会话即生效**，无需 SDK 参与；SDK 也没有管理 API。
 
 ## 0. 分期
 
 - **Phase 1（本次实施）**：纯文件读写的管理面——设置 Hub 骨架 + 插件（列表/启停）/ MCP（三 scope 增删改）/ 技能 / 子代理 / 命令 / 权限规则 / Hooks / CLAUDE.md / 磁盘占用，共 10 页 + 项目右键菜单入口 + 健康检查弹窗磁盘段。
-- **Phase 2（后续，不在本次）**：spawn CLI 的安装类（`claude plugin install/update/uninstall`、marketplace 增删改——注意数据源要与 `settings.json → extraKnownMarketplaces` 取并集、`claude mcp get/list` 连接测试）、统计弹窗「提示词历史」tab、`claude plugin details` token 成本、磁盘各桶清理动作、运行中会话 `reload_plugins` 探针、HooksPage persist 在飞禁用操作钮（可选加固：杜绝快速连点的 last-op-wins 回退）。
+- **Phase 2**：
+  - **已做（2026-11-16）**：统计弹窗「提示词历史」tab（`cchistory.ts` + `cc_history_list`）、磁盘分桶清理（`ccdisk.cleanDiskBucket` + `cc_disk_clean`，保守 5 桶，详见 CLAUDE.md）、HooksPage persist 在飞禁用操作钮。
+  - **未做**：spawn CLI 的安装类（`claude plugin install/update/uninstall`、marketplace 增删改——注意数据源要与 `settings.json → extraKnownMarketplaces` 取并集）、`claude mcp get/list` 连接测试、`claude plugin details` token 成本、运行中会话 `reload_plugins` 探针。
+  - ⚠️ 未做项都依赖**未探的 CLI 输出格式**，开工前先跑只读探针（`%TEMP%` 独立脚本，不提交）。
 
 Phase 1 内**零新 npm 依赖**（纯 fs + 既有工具）；一切 spawn 类操作推迟到 Phase 2。
 
@@ -110,7 +113,7 @@ cc_disk_usage    void                                          → { total, buck
 | 技能 | 目录扫描 | 建目录+SKILL.md / 删进回收站 | 卡片网格；点击展开 SKILL.md 编辑器；新建=输入名字生成骨架 |
 | 子代理/命令 | `*.md` 扫描 | 建改删同上 | 同技能，单文件即条目；命令页注明「插件命令归插件页」 |
 | CLAUDE.md | 两级文件 | 原子写 | textarea 编辑 + 保存；@import 提示 chips（只展示不改写） |
-| 磁盘占用 | ccdisk | 无 | 分桶条 + 总量（走查不 follow 符号链接/junction，防环与重复计数）；桶含 projects / file-history / plugins(cache+marketplaces) / paste-cache / history.jsonl / plans / trash/cc-assets / 其余杂项；「会话数据」桶给「查看回收站」入口；其余桶 Phase 1 无清理动作（只展示），清理在 Phase 2 逐桶评估 |
+| 磁盘占用 | ccdisk | 无 | 分桶条 + 总量（走查不 follow 符号链接/junction，防环与重复计数）；桶含 projects / file-history / plugins(cache+marketplaces) / paste-cache / history.jsonl / plans / trash/cc-assets / 其余杂项；「会话数据」桶给「查看回收站」入口；Phase 2 已开放 5 桶清理（`paste-cache`/`plugin-cache`/`history-jsonl`/`plans`/`cc-assets-trash`），其余桶只展示 |
 
 ## 5. 关键设计决策
 
