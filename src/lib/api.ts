@@ -23,6 +23,7 @@ import type {
   McpScope,
   PermissionRules,
   PluginListView,
+  PromptHistoryResult,
 } from "../../electron/ipc-contract";
 import { Channel } from "./channel";
 import type {
@@ -395,4 +396,6 @@ export const api = {
   ccClaudeMdWrite: (scope: AssetScope, content: string, projectPath?: string) =>
     invoke<string>("cc_claudemd_write", { scope, content, ...(projectPath ? { projectPath } : {}) }),
   ccDiskUsage: () => invoke<DiskUsage>("cc_disk_usage"),
+  ccHistoryList: (opts?: { limit?: number; search?: string }) =>
+    invoke<PromptHistoryResult>("cc_history_list", opts ?? {}),
 };

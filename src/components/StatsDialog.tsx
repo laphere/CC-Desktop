@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../lib/api";
 import type { UsageStats } from "../types";
 import Modal from "./Modal";
+import PromptHistoryPanel from "./PromptHistoryPanel";
 
 interface Props {
   onClose: () => void;
@@ -139,6 +140,8 @@ export default function StatsDialog({ onClose }: Props) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [range, setRange] = useState<Range>("7d");
+  /** 弹窗内两个视图：使用统计 / 提示词历史（共用同一定高面板，尺寸不跳） */
+  const [view, setView] = useState<"stats" | "history">("stats");
   const [projSort, setProjSort] = useState<SortKey>("tokens");
   const [hoverDay, setHoverDay] = useState<number | null>(null);
 
@@ -415,35 +418,53 @@ export default function StatsDialog({ onClose }: Props) {
     <Modal title="使用统计" width={660} className="stats-modal" onClose={onClose}>
       <div className="stats-toolbar">
         <div className="stats-range">
-          {RANGE_LABELS.map(([r, label]) => (
-            <button
-              key={r}
-              className={range === r ? "on" : ""}
-              onClick={() => {
-                setRange(r);
-                setHoverDay(null); // 柱体随范围重建，旧悬停索引会指错柱
-              }}
-            >
-              {label}
-            </button>
-          ))}
+          <button className={view === "stats" ? "on" : ""} onClick={() => setView("stats")}>
+            使用统计
+          </button>
+          <button
+            className={view === "history" ? "on" : ""}
+            onClick={() => setView("history")}
+          >
+            提示词历史
+          </button>
         </div>
-        <span className="stats-range-note">
-          汇总、趋势、排行与模型均按所选范围；已删会话仍计入
-        </span>
-        <button
-          className="btn"
-          style={{ marginLeft: "auto" }}
-          onClick={() => setReloadKey((k) => k + 1)}
-          disabled={refreshing}
-          title="重新统计（仅重扫有变更的会话文件）"
-        >
-          {refreshing ? "刷新中…" : "刷新"}
-        </button>
+        {view === "stats" && (
+          <>
+            <div className="stats-range">
+              {RANGE_LABELS.map(([r, label]) => (
+                <button
+                  key={r}
+                  className={range === r ? "on" : ""}
+                  onClick={() => {
+                    setRange(r);
+                    setHoverDay(null); // 柱体随范围重建，旧悬停索引会指错柱
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <span className="stats-range-note">
+              汇总、趋势、排行与模型均按所选范围；已删会话仍计入
+            </span>
+            <button
+              className="btn"
+              style={{ marginLeft: "auto" }}
+              onClick={() => setReloadKey((k) => k + 1)}
+              disabled={refreshing}
+              title="重新统计（仅重扫有变更的会话文件）"
+            >
+              {refreshing ? "刷新中…" : "刷新"}
+            </button>
+          </>
+        )}
       </div>
 
-      {/* 三类占位态都用 stats-fill：在定高面板里垂直居中（见 styles.css） */}
-      {!stats && loading ? (
+      {/* 三类占位态都用 stats-fill：在定高面板里垂直居中（见 styles.css）。
+          提示词历史是同一面板里的另一个视图，切换不改变弹窗尺寸 */}
+      {view === "history" ? (
+        <PromptHistoryPanel />
+      ) : !stats && loading ? (
         <div className="stats-empty stats-fill">统计中…（首次需扫描所有会话文件）</div>
       ) : !stats && loadError ? (
         <div className="stats-empty stats-fill">加载失败：{loadError}</div>
