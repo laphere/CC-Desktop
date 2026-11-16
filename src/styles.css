@@ -7030,3 +7030,80 @@ html.ctrl-links .md-body a {
   justify-content: center;
   line-height: 1;
 }
+
+/* ---- 插件详情 / MCP 连接测试（Phase 2 只读项）----
+ *  两者都是「卡片内展开区」：上边框与标题行分隔，字号比标题小一档 */
+.cc-plugin-detail,
+.cc-mcp-check {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.cc-plugin-detail-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.cc-plugin-detail-desc {
+  line-height: 1.5;
+}
+
+.cc-plugin-detail-sec {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.cc-plugin-detail-label {
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.cc-plugin-detail-list {
+  color: var(--muted);
+}
+
+.cc-plugin-detail-raw,
+.cc-mcp-check-raw {
+  margin-top: 2px;
+}
+
+.cc-plugin-detail-raw summary,
+.cc-mcp-check-raw summary {
+  cursor: pointer;
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.cc-plugin-detail-raw pre,
+.cc-mcp-check-raw pre {
+  margin: 4px 0 0;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--panel-2);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 180px;
+  overflow: auto;
+}
+
+.cc-mcp-check-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cc-mcp-check-cmd {
+  color: var(--muted);
+  font-size: 11.5px;
+}

@@ -12,6 +12,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { writeJsonAtomic } from "./provider";
 import { readJsonObjectFile, matchProjectKey, matchProjectKeys, canonicalProjectKey, validateProjectPath, deepEqual } from "./ccjson";
+import { runClaude } from "./cccli";
 
 export type McpScope = "user" | "project" | "local";
 
@@ -295,4 +296,108 @@ export async function approveMcpServer(
   rec.enabledMcpjsonServers = nextEnabled;
   rec.disabledMcpjsonServers = nextDisabled;
   writeClaudeJson(cfgDir, env, claudeJson);
+}
+
+// ---------------- 连接测试（只读 CLI：claude mcp get）----------------
+
+export interface McpCheckResult {
+  name: string | null;
+  /** 归一后的状态：已连接 / 待审批 / 连接失败 / 其他原样文本 */
+  status: string | null;
+  scope: string | null;
+  type: string | null;
+  command: string | null;
+  args: string | null;
+  /** 失败原因（超时/非零退出且无 stdout）；成功为 null */
+  error: string | null;
+  timedOut: boolean;
+  /** CLI 原始输出，UI 折叠展示（解析不出时是唯一可见内容） */
+  raw: string;
+}
+
+const EMPTY_CHECK: McpCheckResult = {
+  name: null,
+  status: null,
+  scope: null,
+  type: null,
+  command: null,
+  args: null,
+  error: null,
+  timedOut: false,
+  raw: "",
+};
+
+/** `✔ Connected` / `✘ …` / `⏸ Pending approval` → 中文可读状态，其余原样（去符号） */
+function normalizeStatus(s: string): string {
+  const t = s.replace(/[✔✘⏸]/g, "").trim();
+  if (/connected/i.test(t)) return "已连接";
+  if (/pending approval/i.test(t)) return "待审批";
+  if (/fail|error|refused|timed? ?out|unreachable|not found/i.test(t)) return "连接失败";
+  return t;
+}
+
+/**
+ * 解析 `claude mcp get <name>` 的文本输出。**容错优先**：认不出的行跳过，解析不出
+ * 还有 `raw` 可显示。实测形状（2.1.325）：
+ * ```
+ * codegraph:
+ *   Scope: User config (available in all your projects)
+ *   Status: ✔ Connected
+ *   Type: stdio
+ *   Command: codegraph
+ *   Args: serve --mcp
+ * ```
+ */
+export function parseMcpGet(text: string): McpCheckResult {
+  const raw = text.trim();
+  let name: string | null = null;
+  let status: string | null = null;
+  let scope: string | null = null;
+  let type: string | null = null;
+  let command: string | null = null;
+  let args: string | null = null;
+
+  for (const line of raw.split(/\r?\n/)) {
+    const t = line.trim();
+    if (t === "") continue;
+    if (!line.startsWith(" ") && !line.startsWith("\t")) {
+      // 顶层行里**只有首个**是服务器名（形如 `codegraph:`）；其后还可能有
+      // 「To remove this server, run: …」这类提示行，别当名字覆盖
+      if (name === null) name = t.replace(/:$/, "");
+      continue;
+    }
+    if (t.startsWith("Status:")) status = normalizeStatus(t.slice("Status:".length));
+    else if (t.startsWith("Scope:")) scope = t.slice("Scope:".length).trim();
+    else if (t.startsWith("Type:")) type = t.slice("Type:".length).trim();
+    else if (t.startsWith("Command:")) command = t.slice("Command:".length).trim();
+    else if (t.startsWith("Args:")) args = t.slice("Args:".length).trim();
+  }
+
+  return { ...EMPTY_CHECK, name, status, scope, type, command, args, raw };
+}
+
+/** 连接测试（会真起服务器进程做健康检查）。
+ *  ⚠️ cwd 传项目目录——项目 scope 的「待审批」判定依赖 CLI 的工作目录，
+ *  不传会看不出 `.mcp.json` 里未批准的服务器。失败不抛，原因进 `error` + `raw`。 */
+export async function checkMcpServer(
+  name: string,
+  projectPath: string | null,
+): Promise<McpCheckResult> {
+  const r = await runClaude(["mcp", "get", name], { cwd: projectPath ?? undefined });
+  if (r.timedOut) {
+    return {
+      ...EMPTY_CHECK,
+      name,
+      status: "连接失败",
+      error: "健康检查超时",
+      timedOut: true,
+      raw: [r.stdout, r.stderr].filter(Boolean).join("\n"),
+    };
+  }
+  const out = r.stdout || r.stderr;
+  if (r.code !== 0 && !r.stdout) {
+    return { ...EMPTY_CHECK, name, status: "连接失败", error: `退出码 ${r.code ?? "未知"}`, raw: r.stderr };
+  }
+  const parsed = parseMcpGet(out);
+  return { ...parsed, name: parsed.name ?? name };
 }

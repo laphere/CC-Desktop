@@ -9,6 +9,7 @@ import {
   claudeJsonPath,
   deleteMcpServer,
   listMcpServers,
+  parseMcpGet,
   saveMcpServer,
   validateMcpConfig,
 } from "./ccmcp";
@@ -220,5 +221,42 @@ describe("配置校验", () => {
     expect(() => validateMcpConfig({ type: "http" })).toThrow(/url/);
     expect(() => validateMcpConfig({ type: "grpc", command: "x" })).toThrow(/类型/);
     expect(() => validateMcpConfig({ command: "x" })).not.toThrow(); // 缺 type 按 stdio
+  });
+});
+
+// fixture 取自本机 CLI 2.1.325 的 `claude mcp get codegraph` 实测输出
+const MCP_GET_SAMPLE = `codegraph:
+  Scope: User config (available in all your projects)
+  Status: ✔ Connected
+  Type: stdio
+  Command: codegraph
+  Args: serve --mcp
+
+To remove this server, run: claude mcp remove codegraph -s user`;
+
+describe("parseMcpGet", () => {
+  it("解析连接态与配置字段", () => {
+    const r = parseMcpGet(MCP_GET_SAMPLE);
+    expect(r.error).toBeNull();
+    expect(r.name).toBe("codegraph");
+    expect(r.status).toBe("已连接");
+    expect(r.scope).toBe("User config (available in all your projects)");
+    expect(r.type).toBe("stdio");
+    expect(r.command).toBe("codegraph");
+    expect(r.args).toBe("serve --mcp");
+    expect(r.raw).toContain("To remove this server");
+  });
+
+  it("待审批 → 待审批；失败 → 连接失败", () => {
+    expect(parseMcpGet("x:\n  Status: ⏸ Pending approval").status).toBe("待审批");
+    expect(parseMcpGet("x:\n  Status: ✘ Failed to connect").status).toBe("连接失败");
+    expect(parseMcpGet("x:\n  Status: ✔ Connected").status).toBe("已连接");
+  });
+
+  it("空文本：字段全空，raw 为空串", () => {
+    const r = parseMcpGet("  \n ");
+    expect(r.name).toBeNull();
+    expect(r.status).toBeNull();
+    expect(r.raw).toBe("");
   });
 });

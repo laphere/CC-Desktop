@@ -9,6 +9,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { readJsonObjectFile } from "./ccjson";
 import { readEnabledPlugins, setPluginEnabled } from "./ccsettings";
+import { runClaude } from "./cccli";
 
 export interface PluginView {
   /** 形如 `code-review@claude-plugins-official` */
@@ -126,4 +127,127 @@ function existsDir(p: string): boolean {
 /** 启停插件：只翻 enabledPlugins 布尔位（见 ccsettings.setPluginEnabled） */
 export function togglePlugin(cfgDir: string, pluginId: string, enabled: boolean): Promise<void> {
   return setPluginEnabled(cfgDir, pluginId, enabled);
+}
+
+// ---------------- 插件详情（只读 CLI：claude plugin details）----------------
+
+export interface PluginComponent {
+  label: string;
+  count: number;
+}
+
+export interface PluginDetails {
+  name: string | null;
+  version: string | null;
+  description: string | null;
+  source: string | null;
+  components: PluginComponent[];
+  /** `Always-on: ~N tok …` 那一行的值（无则 null） */
+  tokenAlwaysOn: string | null;
+  /** token 成本段的其余行（按工具/技能逐项列出时） */
+  tokenLines: string[];
+  /** 失败原因（超时/非零退出且无 stdout）；成功为 null */
+  error: string | null;
+  /** CLI 原始输出，UI 折叠展示（解析不出时是唯一可见内容） */
+  raw: string;
+}
+
+const EMPTY_DETAILS: PluginDetails = {
+  name: null,
+  version: null,
+  description: null,
+  source: null,
+  components: [],
+  tokenAlwaysOn: null,
+  tokenLines: [],
+  error: null,
+  raw: "",
+};
+
+/**
+ * 解析 `claude plugin details <name>` 的文本输出。**容错优先**：认不出的行直接跳过，
+ * 整段解析不出来时调用方还有 `raw` 可显示——CLI 升级改了格式不该让界面报错。
+ * 实测形状（2.1.325）：
+ * ```
+ * claude-hud 0.7.0
+ *   Description: …
+ *   Source: claude-hud@claude-hud
+ * Component inventory
+ *   Skills (0)
+ *   MCP servers (0)
+ * Projected token cost
+ *   Always-on:   ~0 tok   added to every session
+ * ```
+ */
+export function parsePluginDetails(text: string): PluginDetails {
+  const raw = text.trim();
+  const lines = raw.split(/\r?\n/);
+  let name: string | null = null;
+  let version: string | null = null;
+  let description: string | null = null;
+  let source: string | null = null;
+  const components: PluginComponent[] = [];
+  let tokenAlwaysOn: string | null = null;
+  const tokenLines: string[] = [];
+  let section = "";
+
+  for (const line of lines) {
+    const indented = line.startsWith(" ") || line.startsWith("\t");
+    const t = line.trim();
+    if (t === "") continue;
+
+    if (!indented) {
+      // 顶层行：首个是「名字 版本」，其后是各段标题
+      if (t === "Component inventory") {
+        section = "components";
+        continue;
+      }
+      if (t === "Projected token cost") {
+        section = "token";
+        continue;
+      }
+      if (name === null) {
+        const m = t.match(/^(\S+)(?:\s+(\S+))?$/);
+        if (m) {
+          name = m[1];
+          version = m[2] ?? null;
+        }
+      }
+      section = "";
+      continue;
+    }
+
+    if (t.startsWith("Description:")) {
+      description = t.slice("Description:".length).trim();
+      continue;
+    }
+    if (t.startsWith("Source:")) {
+      source = t.slice("Source:".length).trim();
+      continue;
+    }
+    if (section === "components") {
+      const m = t.match(/^(.+?)\s+\((\d+)\)$/);
+      if (m) components.push({ label: m[1].trim(), count: Number(m[2]) });
+      continue;
+    }
+    if (section === "token") {
+      if (t.startsWith("Always-on:")) tokenAlwaysOn = t.slice("Always-on:".length).trim();
+      else tokenLines.push(t);
+    }
+  }
+
+  return { ...EMPTY_DETAILS, name, version, description, source, components, tokenAlwaysOn, tokenLines, raw };
+}
+
+/** 查插件详情（组件清单 + projected token cost）。失败不抛，原因进 `error` + `raw`。 */
+export async function pluginDetails(name: string): Promise<PluginDetails> {
+  const r = await runClaude(["plugin", "details", name]);
+  if (r.timedOut) {
+    return { ...EMPTY_DETAILS, error: "查询超时", raw: [r.stdout, r.stderr].filter(Boolean).join("\n") };
+  }
+  const out = r.stdout || r.stderr;
+  if (r.code !== 0 && !r.stdout) {
+    return { ...EMPTY_DETAILS, error: `退出码 ${r.code ?? "未知"}`, raw: r.stderr };
+  }
+  return parsePluginDetails(out);
 }

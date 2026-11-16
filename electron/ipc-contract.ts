@@ -9,8 +9,8 @@
 import type { ChatImage, ChatPermissionMode } from "./backend/chat";
 import type { CcScope, DefaultModeChain, HooksMap, PermissionRules } from "./backend/ccsettings";
 import type { DisabledHookEntry } from "./backend/ccstate";
-import type { McpListView, McpScope, McpServerView } from "./backend/ccmcp";
-import type { PluginListView } from "./backend/ccplugins";
+import type { McpCheckResult, McpListView, McpScope, McpServerView } from "./backend/ccmcp";
+import type { PluginDetails, PluginListView, PluginView } from "./backend/ccplugins";
 import type { AssetKind, AssetScope, AssetView, ClaudeMdView } from "./backend/ccassets";
 import type { CleanResult, DiskUsage } from "./backend/ccdisk";
 
@@ -21,10 +21,13 @@ export type {
   HooksMap,
   PermissionRules,
   DisabledHookEntry,
+  McpCheckResult,
   McpListView,
   McpScope,
   McpServerView,
+  PluginDetails,
   PluginListView,
+  PluginView,
   AssetKind,
   AssetScope,
   AssetView,
@@ -247,12 +250,16 @@ export interface IpcContract {
   cc_plugin_list: void;
   /** 启停插件：只翻用户级 enabledPlugins 布尔位 */
   cc_plugin_toggle: { id: string; enabled: boolean };
+  /** 插件详情（组件清单 + projected token cost），只读 CLI */
+  cc_plugin_details: { name: string };
   /** MCP 三 scope 列表（project/local 为空当没传 projectPath） */
   cc_mcp_list: { projectPath?: string };
   cc_mcp_save: { scope: McpScope; projectPath?: string; name: string; config: unknown };
   cc_mcp_delete: { scope: McpScope; projectPath?: string; name: string };
   /** .mcp.json 服务器的审批（enabled/disabled 名单，projects.<项目键> 下） */
   cc_mcp_approve: { projectPath: string; name: string; approved: boolean };
+  /** MCP 连接测试（真做健康检查），cwd 用 projectPath */
+  cc_mcp_check: { name: string; projectPath?: string };
   /** 技能/子代理/命令清单；目录未创建返回 []（空态，不是错误） */
   cc_assets_list: { kind: AssetKind; scope: AssetScope; projectPath?: string };
   cc_asset_read: { kind: AssetKind; scope: AssetScope; projectPath?: string; name: string };
@@ -359,10 +366,12 @@ export const IPC_CHANNELS = [
   "cc_hooks_write",
   "cc_plugin_list",
   "cc_plugin_toggle",
+  "cc_plugin_details",
   "cc_mcp_list",
   "cc_mcp_save",
   "cc_mcp_delete",
   "cc_mcp_approve",
+  "cc_mcp_check",
   "cc_assets_list",
   "cc_asset_read",
   "cc_asset_write",

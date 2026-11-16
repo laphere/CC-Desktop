@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { listPlugins, togglePlugin } from "./ccplugins";
+import { listPlugins, parsePluginDetails, togglePlugin } from "./ccplugins";
 
 let tmp: string;
 
@@ -83,5 +83,62 @@ describe("启停", () => {
     // env 键仍在
     const settings = JSON.parse(fs.readFileSync(path.join(tmp, "settings.json"), "utf8"));
     expect(settings.env).toEqual({ A: "b" });
+  });
+});
+
+// fixture 取自本机 CLI 2.1.325 的 `claude plugin details claude-hud@claude-hud` 实测输出
+const DETAILS_SAMPLE = `claude-hud 0.7.0
+  Description: Real-time statusline showing context usage, active tools, running agents, and todo progress.
+  Source: claude-hud@claude-hud
+
+Component inventory
+  Skills (0)
+  Agents (0)
+  Hooks (0)
+  MCP servers (0)
+  LSP servers (0)
+
+Projected token cost
+  Always-on:   ~0 tok   added to every session`;
+
+describe("parsePluginDetails", () => {
+  it("解析名字/版本/描述/来源/组件清单/token 成本", () => {
+    const d = parsePluginDetails(DETAILS_SAMPLE);
+    expect(d.error).toBeNull();
+    expect(d.name).toBe("claude-hud");
+    expect(d.version).toBe("0.7.0");
+    expect(d.description).toContain("Real-time statusline");
+    expect(d.source).toBe("claude-hud@claude-hud");
+    expect(d.components).toEqual([
+      { label: "Skills", count: 0 },
+      { label: "Agents", count: 0 },
+      { label: "Hooks", count: 0 },
+      { label: "MCP servers", count: 0 },
+      { label: "LSP servers", count: 0 },
+    ]);
+    expect(d.tokenAlwaysOn).toContain("~0 tok");
+    expect(d.raw).toContain("Projected token cost");
+  });
+
+  it("没有 token 成本段：tokenAlwaysOn 为 null，不报错", () => {
+    const d = parsePluginDetails("foo 1.2.3\n  Description: x\n  Source: foo@bar\n\nComponent inventory\n  Skills (2)");
+    expect(d.name).toBe("foo");
+    expect(d.components).toEqual([{ label: "Skills", count: 2 }]);
+    expect(d.tokenAlwaysOn).toBeNull();
+    expect(d.tokenLines).toEqual([]);
+  });
+
+  it("空文本：字段全空，raw 为空串（UI 据此显示空态）", () => {
+    const d = parsePluginDetails("   \n\n ");
+    expect(d.name).toBeNull();
+    expect(d.components).toEqual([]);
+    expect(d.raw).toBe("");
+  });
+
+  it("非预期格式：不抛错，raw 原样保留（容错优先）", () => {
+    const weird = " whatever\n ligne inattendue";
+    const d = parsePluginDetails(weird);
+    expect(d.raw).toContain("inattendue");
+    expect(d.components).toEqual([]);
   });
 });

@@ -8,10 +8,13 @@ import { api } from "../../lib/api";
 import type {
   AssetScope,
   AssetView,
+  McpCheckResult,
   McpListView,
   McpScope,
   McpServerView,
+  PluginDetails,
   PluginListView,
+  PluginView,
 } from "../../../electron/ipc-contract";
 import {
   Badge,
@@ -27,10 +30,84 @@ import {
 
 // ================= 插件 =================
 
+/** 插件详情展开区（组件清单 + projected token cost；解析不出时至少给出原始输出） */
+function PluginDetailBody({ detail, loading }: { detail: PluginDetails | null; loading: boolean }) {
+  if (loading) return <div className="cc-plugin-detail"><span className="cc-hint">读取中…</span></div>;
+  if (!detail) return null;
+  return (
+    <div className="cc-plugin-detail">
+      {detail.error && <div className="cc-error">{detail.error}</div>}
+      {(detail.name || detail.version) && (
+        <div className="cc-plugin-detail-head">
+          <b>{detail.name ?? "（未解析）"}</b>
+          {detail.version && <span className="cc-hint">v{detail.version}</span>}
+        </div>
+      )}
+      {detail.description && <div className="cc-plugin-detail-desc">{detail.description}</div>}
+      {detail.source && <div className="cc-hint">来源：{detail.source}</div>}
+      {detail.components.length > 0 && (
+        <div className="cc-plugin-detail-sec">
+          <span className="cc-plugin-detail-label">组件清单</span>
+          <span className="cc-plugin-detail-list">
+            {detail.components.map((c) => `${c.label} ${c.count}`).join(" · ")}
+          </span>
+        </div>
+      )}
+      {(detail.tokenAlwaysOn || detail.tokenLines.length > 0) && (
+        <div className="cc-plugin-detail-sec">
+          <span className="cc-plugin-detail-label">Projected token cost</span>
+          {detail.tokenAlwaysOn && <div className="cc-plugin-detail-list">{detail.tokenAlwaysOn}</div>}
+          {detail.tokenLines.map((l, i) => (
+            <div key={i} className="cc-hint">{l}</div>
+          ))}
+        </div>
+      )}
+      {detail.raw && (
+        <details className="cc-plugin-detail-raw">
+          <summary>原始输出</summary>
+          <pre>{detail.raw}</pre>
+        </details>
+      )}
+    </div>
+  );
+}
+
 export function PluginsPage({ onToast }: { onToast?: (m: string) => void }) {
   const { data, error, loading, reload } = useAsync<PluginListView>(() => api.ccPluginList(), []);
+  const [detailId, setDetailId] = useState<string | null>(null);
+  const [detail, setDetail] = useState<PluginDetails | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
   if (error || loading) return <LoadOrError loading={loading} error={error}>{null}</LoadOrError>;
   if (!data) return null;
+
+  /** 展开/收起某插件的详情（再点一次收起；详情失败时后端回 error + raw，不抛） */
+  const openDetail = async (p: PluginView) => {
+    if (detailId === p.id) {
+      setDetailId(null);
+      setDetail(null);
+      return;
+    }
+    setDetailId(p.id);
+    setDetail(null);
+    setDetailLoading(true);
+    try {
+      setDetail(await api.ccPluginDetails(p.id));
+    } catch (e) {
+      setDetail({
+        name: p.id,
+        version: null,
+        description: null,
+        source: null,
+        components: [],
+        tokenAlwaysOn: null,
+        tokenLines: [],
+        error: String(e),
+        raw: "",
+      });
+    } finally {
+      setDetailLoading(false);
+    }
+  };
 
   const toggle = async (id: string, enabled: boolean) => {
     try {
@@ -65,14 +142,18 @@ export function PluginsPage({ onToast }: { onToast?: (m: string) => void }) {
             </>
           }
           sub={p.installPath ?? "无安装记录（官方内置 marketplace 按需装载）"}
+          children={
+            detailId === p.id ? <PluginDetailBody detail={detail} loading={detailLoading} /> : undefined
+          }
           ops={
             <>
               <Toggle on={p.enabled} onClick={() => toggle(p.id, !p.enabled)} title="启用/停用（写 settings.json 的 enabledPlugins）" />
               <button
                 type="button"
                 className="icon-btn icon-btn-sm"
-                disabled
-                title="详情（后续版本：claude plugin details）"
+                disabled={detailLoading && detailId === p.id}
+                title="详情（claude plugin details：组件清单与 projected token 成本）"
+                onClick={() => openDetail(p)}
               >
                 <PlugIcon size={11} />
               </button>
@@ -202,7 +283,32 @@ function McpRow({
   onToast?: (m: string) => void;
 }) {
   const [editing, setEditing] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [check, setCheck] = useState<McpCheckResult | null>(null);
   const approved = v.approved;
+  /** 连接测试会真起服务器进程做健康检查（可能几秒），期间禁用按钮 */
+  const runCheck = async () => {
+    if (checking) return;
+    setChecking(true);
+    setCheck(null);
+    try {
+      setCheck(await api.ccMcpCheck(v.name, projectPath ?? undefined));
+    } catch (e) {
+      setCheck({
+        name: v.name,
+        status: "连接失败",
+        scope: null,
+        type: null,
+        command: null,
+        args: null,
+        error: String(e),
+        timedOut: false,
+        raw: "",
+      });
+    } finally {
+      setChecking(false);
+    }
+  };
   const del = async () => {
     if (!confirm(`删除 MCP 服务器「${v.name}」（${scope} scope）？`)) return;
     try {
@@ -259,8 +365,43 @@ function McpRow({
         </>
       }
       sub={<span className="mono">{configSummary(v.config)}</span>}
+      children={
+        check && (
+          <div className="cc-mcp-check">
+            <div className="cc-mcp-check-head">
+              <Badge kind={check.status === "已连接" ? "ok" : check.status === "待审批" ? "star" : "danger"}>
+                {check.status ?? "未知"}
+              </Badge>
+              {check.scope && <span className="cc-hint">{check.scope}</span>}
+            </div>
+            {check.error && <div className="cc-error">{check.error}</div>}
+            {(check.type || check.command) && (
+              <div className="mono cc-mcp-check-cmd">
+                {check.type}
+                {check.command ? `: ${check.command}` : ""}
+                {check.args ? ` ${check.args}` : ""}
+              </div>
+            )}
+            {check.raw && (
+              <details className="cc-mcp-check-raw">
+                <summary>原始输出</summary>
+                <pre>{check.raw}</pre>
+              </details>
+            )}
+          </div>
+        )
+      }
       ops={
         <>
+          <button
+            type="button"
+            className="btn btn-sm"
+            disabled={checking}
+            onClick={runCheck}
+            title="用 claude mcp get 做健康检查（会真连服务器）"
+          >
+            {checking ? "测试中…" : "测试"}
+          </button>
           {scope === "project" && approved === null && projectPath && (
             <button type="button" className="icon-btn icon-btn-sm cc-danger" title="拒绝（写 disabledMcpjsonServers）" onClick={() => approve(false)}>
               <XIcon size={11} />

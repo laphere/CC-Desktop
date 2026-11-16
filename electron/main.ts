@@ -104,8 +104,9 @@ import {
   saveMcpServer,
   deleteMcpServer,
   approveMcpServer,
+  checkMcpServer,
 } from "./backend/ccmcp";
-import { listPlugins, togglePlugin } from "./backend/ccplugins";
+import { listPlugins, pluginDetails, togglePlugin } from "./backend/ccplugins";
 import {
   listAssets,
   readAssetFile,
@@ -817,6 +818,7 @@ function registerIpc(): void {
   });
   handle("cc_plugin_list", () => listPlugins(claudeConfigDir()));
   handle("cc_plugin_toggle", (p) => togglePlugin(claudeConfigDir(), ccStr(p.id, "插件 id"), p.enabled === true));
+  handle("cc_plugin_details", (p) => pluginDetails(ccStr(p.name, "插件名")));
   handle("cc_mcp_list", (p) =>
     listMcpServers(claudeConfigDir(), p.projectPath ? String(p.projectPath) : null));
   handle("cc_mcp_save", (p) =>
@@ -834,6 +836,9 @@ function registerIpc(): void {
       p.projectPath ? String(p.projectPath) : null,
       ccStr(p.name, "服务器名"),
     ));
+  handle("cc_mcp_check", (p) =>
+    checkMcpServer(ccStr(p.name, "服务器名"), p.projectPath ? String(p.projectPath) : null),
+  );
   handle("cc_mcp_approve", (p) =>
     approveMcpServer(claudeConfigDir(), ccStr(p.projectPath, "projectPath"), ccStr(p.name, "服务器名"), p.approved === true));
   handle("cc_assets_list", (p) =>

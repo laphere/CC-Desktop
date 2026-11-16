@@ -1,6 +1,6 @@
 # 设置与扩展中心（设置 Hub）实施方案
 
-> 状态：**Phase 1 已实施并过两轮评审**（2026-11-14 方案评审；2026-11-15 代码评审后端/前端各一，P0/P1 已修复，测试 537 ✓ + CDP 冒烟 30/30）· **Phase 2 低风险批已落地（2026-11-16）**：磁盘分桶清理 / Hooks 保存期禁用 · 交互原型：`docs/prototype/settings-hub.html`（高保真，视觉 token 逐值取自 `styles.css`）
+> 状态：**Phase 1 已实施并过两轮评审**（2026-11-14 方案评审；2026-11-15 代码评审后端/前端各一，P0/P1 已修复，测试 537 ✓ + CDP 冒烟 30/30）· **Phase 2 低风险批 + 只读探针批已落地（2026-11-16）**：磁盘分桶清理 / Hooks 保存期禁用 / 插件详情与 token 成本 / MCP 连接测试 · 交互原型：`docs/prototype/settings-hub.html`（高保真，视觉 token 逐值取自 `styles.css`）
 > 目标：把 Claude Code 的插件 / MCP / 技能 / 子代理 / 命令 / 权限规则 / Hooks / CLAUDE.md 管理收进设置弹窗（左导航多页），外加磁盘占用体检。
 > 生效原理（已实测，方案成立的前提）：app 内对话层**不传 `settingSources`**（`chat.ts` 注释），CLI 默认加载 user+project+local 三层设置；终端会话天然读配置。**改文件 = 新会话即生效**，无需 SDK 参与；SDK 也没有管理 API。
 
@@ -10,8 +10,9 @@
 - **Phase 2**：
   - **已做（2026-11-16）**：磁盘分桶清理（`ccdisk.cleanDiskBucket` + `cc_disk_clean`，保守 5 桶，详见 CLAUDE.md）、HooksPage persist 在飞禁用操作钮。
   - **已撤（2026-11-16）**：原计划的统计弹窗「提示词历史」tab 不做——它只是 `history.jsonl` 的流水列表（非统计），跨会话找 prompt 的场景弱，且与会话页全文搜索/顶栏标题搜索重叠；真要做需先补「点条目跳回会话」才有意义。
-  - **未做**：spawn CLI 的安装类（`claude plugin install/update/uninstall`、marketplace 增删改——注意数据源要与 `settings.json → extraKnownMarketplaces` 取并集）、`claude mcp get/list` 连接测试、`claude plugin details` token 成本、运行中会话 `reload_plugins` 探针。
-  - ⚠️ 未做项都依赖**未探的 CLI 输出格式**，开工前先跑只读探针（`%TEMP%` 独立脚本，不提交）。
+  - **已做（2026-11-16，只读批）**：插件详情 / projected token 成本（`claude plugin details`，文本解析 + `cc_plugin_details`）、MCP 连接测试（`claude mcp get` 健康检查 + `cc_mcp_check`，cwd 传项目目录）。
+  - **未做**：spawn CLI 的安装类（`claude plugin install/update/uninstall`、marketplace 增删改——注意数据源要与 `settings.json → extraKnownMarketplaces` 取并集）、运行中会话 `reload_plugins`（SDK `Query.reloadPlugins`，非 CLI）。
+  - ⚠️ 探针结论（2026-11-16，CLI 2.1.325）：`plugin list/marketplace list/enable/disable/uninstall/install/update` 有 `--json`；`plugin details` 与 `mcp get/list` 只有文本（已做容错解析）；`install/update` 的 marketplace 声明命令需 `--accept-command <sha256>` 或 `-y`（**两阶段确认**，不默认 -y）。
 
 Phase 1 内**零新 npm 依赖**（纯 fs + 既有工具）；一切 spawn 类操作推迟到 Phase 2。
 

@@ -20,9 +20,11 @@ import type {
   CleanResult,
   DiskUsage,
   HooksMap,
+  McpCheckResult,
   McpListView,
   McpScope,
   PermissionRules,
+  PluginDetails,
   PluginListView,
 } from "../../electron/ipc-contract";
 import { Channel } from "./channel";
@@ -373,6 +375,7 @@ export const api = {
   ccPluginList: () => invoke<PluginListView>("cc_plugin_list"),
   ccPluginToggle: (id: string, enabled: boolean) =>
     invoke<void>("cc_plugin_toggle", { id, enabled }),
+  ccPluginDetails: (name: string) => invoke<PluginDetails>("cc_plugin_details", { name }),
   ccMcpList: (projectPath?: string) =>
     invoke<McpListView>("cc_mcp_list", projectPath ? { projectPath } : {}),
   ccMcpSave: (scope: McpScope, name: string, config: unknown, projectPath?: string) =>
@@ -381,6 +384,8 @@ export const api = {
     invoke<void>("cc_mcp_delete", { scope, name, ...(projectPath ? { projectPath } : {}) }),
   ccMcpApprove: (projectPath: string, name: string, approved: boolean) =>
     invoke<void>("cc_mcp_approve", { projectPath, name, approved }),
+  ccMcpCheck: (name: string, projectPath?: string) =>
+    invoke<McpCheckResult>("cc_mcp_check", { name, ...(projectPath ? { projectPath } : {}) }),
   ccAssetsList: (kind: AssetKind, scope: AssetScope, projectPath?: string) =>
     invoke<AssetView[]>("cc_assets_list", { kind, scope, ...(projectPath ? { projectPath } : {}) }),
   ccAssetRead: (kind: AssetKind, scope: AssetScope, name: string, projectPath?: string) =>
