@@ -308,6 +308,8 @@ export interface McpCheckResult {
   type: string | null;
   command: string | null;
   args: string | null;
+  /** CLI 的 `Issue:` 行（连接失败原因，如 `CONNECTION_CLOSED: …`），无则 null */
+  issue: string | null;
   /** 失败原因（超时/非零退出且无 stdout）；成功为 null */
   error: string | null;
   timedOut: boolean;
@@ -322,6 +324,7 @@ const EMPTY_CHECK: McpCheckResult = {
   type: null,
   command: null,
   args: null,
+  issue: null,
   error: null,
   timedOut: false,
   raw: "",
@@ -356,6 +359,7 @@ export function parseMcpGet(text: string): McpCheckResult {
   let type: string | null = null;
   let command: string | null = null;
   let args: string | null = null;
+  let issue: string | null = null;
 
   for (const line of raw.split(/\r?\n/)) {
     const t = line.trim();
@@ -371,9 +375,10 @@ export function parseMcpGet(text: string): McpCheckResult {
     else if (t.startsWith("Type:")) type = t.slice("Type:".length).trim();
     else if (t.startsWith("Command:")) command = t.slice("Command:".length).trim();
     else if (t.startsWith("Args:")) args = t.slice("Args:".length).trim();
+    else if (t.startsWith("Issue:")) issue = t.slice("Issue:".length).trim();
   }
 
-  return { ...EMPTY_CHECK, name, status, scope, type, command, args, raw };
+  return { ...EMPTY_CHECK, name, status, scope, type, command, args, issue, raw };
 }
 
 /** 连接测试（会真起服务器进程做健康检查）。

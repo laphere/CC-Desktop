@@ -2,7 +2,7 @@
 // 插件页 Phase 1 只读安装状态 + 启停；MCP 用 JSON 表单（与供应商表单同一
 // 「JSON 文本为唯一事实来源」的约定）；文本资源（技能/子代理/命令）为
 // 列表 + 点开编辑 + 删除进回收站。
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   PuzzleIcon,
   WandIcon,
@@ -101,29 +101,44 @@ export function PluginsPage({ onToast }: { onToast?: (m: string) => void }) {
   //  ⚠️ 这些 useState 必须留在 early return 之前（hooks 顺序不能随渲染变化） ----
   const [confirm, setConfirm] = useState<
     | { kind: "uninstall"; plugin: PluginView }
+    | { kind: "mkt-add"; source: string }
     | { kind: "mkt-remove"; name: string }
     | { kind: "mkt-update"; name: string }
     | null
   >(null);
   const [addingMkt, setAddingMkt] = useState(false);
   const [mktSource, setMktSource] = useState("");
-  const [mktBusy, setMktBusy] = useState(false);
+  /** 持久错误条：CLI 失败原因不只进 2.5s 就消失的 toast，页顶留一份可关的 */
+  const [pageError, setPageError] = useState<string | null>(null);
+  /** 详情请求序号：只接受最后一条的结果，避免「点 A 再点 B，A 的结果落到 B 行」 */
+  const detailReqRef = useRef(0);
   if (error || loading) return <LoadOrError loading={loading} error={error}>{null}</LoadOrError>;
   if (!data) return null;
+
+  // 列表刷新（含卸载/启停后）清掉展开的详情，避免旧数据留在原行
+  useEffect(() => {
+    setDetailId(null);
+    setDetail(null);
+  }, [data]);
 
   /** 展开/收起某插件的详情（再点一次收起；详情失败时后端回 error + raw，不抛） */
   const openDetail = async (p: PluginView) => {
     if (detailId === p.id) {
+      detailReqRef.current++; // 作废在飞的那条
       setDetailId(null);
       setDetail(null);
       return;
     }
+    const req = ++detailReqRef.current;
     setDetailId(p.id);
     setDetail(null);
     setDetailLoading(true);
     try {
-      setDetail(await api.ccPluginDetails(p.id));
+      const r = await api.ccPluginDetails(p.id);
+      if (detailReqRef.current !== req) return; // 期间又点了别的（或收起）
+      setDetail(r);
     } catch (e) {
+      if (detailReqRef.current !== req) return;
       setDetail({
         name: p.id,
         version: null,
@@ -136,7 +151,7 @@ export function PluginsPage({ onToast }: { onToast?: (m: string) => void }) {
         raw: "",
       });
     } finally {
-      setDetailLoading(false);
+      if (detailReqRef.current === req) setDetailLoading(false);
     }
   };
 
@@ -156,44 +171,54 @@ export function PluginsPage({ onToast }: { onToast?: (m: string) => void }) {
     try {
       let r: CliOutcome;
       if (confirm.kind === "uninstall") r = await api.ccPluginUninstall(confirm.plugin.id);
+      else if (confirm.kind === "mkt-add") r = await api.ccMarketplaceAdd(confirm.source);
       else if (confirm.kind === "mkt-remove") r = await api.ccMarketplaceRemove(confirm.name);
       else r = await api.ccMarketplaceUpdate(confirm.name);
       if (r.ok) {
         onToast?.(oneLine(r.message) ?? "完成");
-        setConfirm(null);
+        // 成功关闭也走弹层出场动画；force=true 是因为 ConfirmDialog 的 busy 此刻
+        // 还没清，不 force 会被 canClose 吞掉 → 「点确定不关、再点重跑一遍」
+        animateModalClose(() => setConfirm(null), true);
+        if (confirm.kind === "mkt-add") {
+          setAddingMkt(false);
+          setMktSource("");
+        }
         reload();
       } else {
-        onToast?.(`${r.failureCode ? `[${r.failureCode}] ` : ""}${oneLine(r.message) ?? "操作失败"}`);
+        const msg = `${r.failureCode ? `[${r.failureCode}] ` : ""}${oneLine(r.message) ?? "操作失败"}`;
+        onToast?.(msg);
+        setPageError(msg);
       }
     } catch (e) {
-      onToast?.(`操作失败：${String(e)}`);
+      const msg = `操作失败：${String(e)}`;
+      onToast?.(msg);
+      setPageError(msg);
     }
   };
 
-  const addMarketplace = async () => {
+  /** 添加 marketplace：校验后交给确认框（要拉取外部仓库，必须确认） */
+  const submitMarketplace = () => {
     const src = mktSource.trim();
     if (!src) return;
-    setMktBusy(true);
-    try {
-      const r = await api.ccMarketplaceAdd(src);
-      if (r.ok) {
-        onToast?.(oneLine(r.message) ?? "已添加");
-        setAddingMkt(false);
-        setMktSource("");
-        reload();
-      } else {
-        onToast?.(`${r.failureCode ? `[${r.failureCode}] ` : ""}${oneLine(r.message) ?? "添加失败"}`);
-      }
-    } catch (e) {
-      onToast?.(`添加失败：${String(e)}`);
-    } finally {
-      setMktBusy(false);
+    // 前导 `-` 会被 CLI 当选项、控制字符只会造成噪声——spawn 虽不经 shell（无注入），
+    // 但这两种输入注定是误输入
+    if (src.startsWith("-") || /[\u0000-\u001f]/.test(src)) {
+      onToast?.("源不合法：不能以 - 开头或含控制字符");
+      return;
     }
+    setConfirm({ kind: "mkt-add", source: src });
   };
-
 
   return (
     <>
+      {pageError && (
+        <div className="cc-error cc-page-error">
+          <span>{pageError}</span>
+          <button type="button" className="linkish" onClick={() => setPageError(null)}>
+            关闭
+          </button>
+        </div>
+      )}
       <H3 right={<span className="cc-hint">卸载见插件行；安装 / 更新在后续版本提供（走 claude plugin 命令）</span>}>
         已安装插件
       </H3>
@@ -224,7 +249,10 @@ export function PluginsPage({ onToast }: { onToast?: (m: string) => void }) {
               <button
                 type="button"
                 className="icon-btn icon-btn-sm"
-                disabled={detailLoading && detailId === p.id}
+                aria-label={`插件详情 ${p.name}`}
+                // 内置条目只有 enabledPlugins 记录、没有安装体，`plugin details` 必然
+                // 报 not found——禁用而不是让用户点出一次「未找到」
+                disabled={!p.installed || (detailLoading && detailId === p.id)}
                 title="详情（claude plugin details：组件清单与 projected token 成本）"
                 onClick={() => openDetail(p)}
               >
@@ -234,6 +262,7 @@ export function PluginsPage({ onToast }: { onToast?: (m: string) => void }) {
                 <button
                   type="button"
                   className="icon-btn icon-btn-sm cc-danger"
+                  aria-label={`卸载插件 ${p.name}`}
                   title="卸载（从磁盘删除安装体，CLI 可重装）"
                   onClick={() => setConfirm({ kind: "uninstall", plugin: p })}
                 >
@@ -250,13 +279,12 @@ export function PluginsPage({ onToast }: { onToast?: (m: string) => void }) {
           <button
             type="button"
             className="btn btn-sm"
-            disabled={mktBusy}
             onClick={() => {
               setAddingMkt((v) => !v);
               setMktSource("");
             }}
           >
-            {addingMkt ? "取消添加" : "添加 marketplace"}
+            添加 marketplace
           </button>
         }
       >
@@ -278,15 +306,14 @@ export function PluginsPage({ onToast }: { onToast?: (m: string) => void }) {
             <button
               type="button"
               className="btn btn-sm btn-primary"
-              disabled={mktBusy || !mktSource.trim()}
-              onClick={addMarketplace}
+              disabled={!mktSource.trim()}
+              onClick={submitMarketplace}
             >
               添加
             </button>
             <button
               type="button"
               className="btn btn-sm"
-              disabled={mktBusy}
               onClick={() => {
                 setAddingMkt(false);
                 setMktSource("");
@@ -318,6 +345,7 @@ export function PluginsPage({ onToast }: { onToast?: (m: string) => void }) {
                 <button
                   type="button"
                   className="icon-btn icon-btn-sm cc-danger"
+                  aria-label={`移除 marketplace ${m.name}`}
                   onClick={() => setConfirm({ kind: "mkt-remove", name: m.name })}
                   title="移除 marketplace（清声明与启用条目）"
                 >
@@ -335,19 +363,31 @@ export function PluginsPage({ onToast }: { onToast?: (m: string) => void }) {
           title={
             confirm.kind === "uninstall"
               ? "卸载插件"
-              : confirm.kind === "mkt-remove"
-                ? "移除 marketplace"
-                : "更新 marketplace"
+              : confirm.kind === "mkt-add"
+                ? "添加 marketplace"
+                : confirm.kind === "mkt-remove"
+                  ? "移除 marketplace"
+                  : "更新 marketplace"
           }
           message={
             confirm.kind === "uninstall"
               ? `确定卸载「${confirm.plugin.name}」吗？将从磁盘删除安装体，CLI 可随时重装。`
-              : confirm.kind === "mkt-remove"
-                ? `确定移除 marketplace「${confirm.name}」吗？会同时删掉 settings 里的声明与该市场的启用条目，需重新添加才能恢复。`
-                : `从源重新拉取「${confirm.name}」的本地克隆？本地未推的改动可能被覆盖。`
+              : confirm.kind === "mkt-add"
+                ? `确定添加 marketplace「${confirm.source}」吗？将拉取该外部仓库并写入 settings.json 的 extraKnownMarketplaces。`
+                : confirm.kind === "mkt-remove"
+                  ? `确定移除 marketplace「${confirm.name}」吗？会同时删掉 settings 里的声明与该市场的启用条目，需重新添加才能恢复。`
+                  : `从源重新拉取「${confirm.name}」的本地克隆？本地未推的改动可能被覆盖。`
           }
-          okText={confirm.kind === "mkt-update" ? "更新" : confirm.kind === "mkt-remove" ? "移除" : "卸载"}
-          danger
+          okText={
+            confirm.kind === "mkt-add"
+              ? "添加"
+              : confirm.kind === "mkt-update"
+                ? "更新"
+                : confirm.kind === "mkt-remove"
+                  ? "移除"
+                  : "卸载"
+          }
+          danger={confirm.kind !== "mkt-update"}
           onCancel={() => animateModalClose(() => setConfirm(null))}
           onOk={runConfirm}
         />
@@ -392,7 +432,9 @@ function McpForm({
 }) {
   const [name, setName] = useState(initialName);
   const [json, setJson] = useState(initialJson);
+  const [saving, setSaving] = useState(false);
   const save = async () => {
+    if (saving) return; // 连点不重复写盘（与 Hooks 页保存期禁用的口径一致）
     let config: unknown;
     try {
       config = JSON.parse(json);
@@ -400,11 +442,14 @@ function McpForm({
       onToast?.("配置不是合法 JSON");
       return;
     }
+    setSaving(true);
     try {
       await api.ccMcpSave(scope, name.trim(), config, projectPath ?? undefined);
       onDone();
     } catch (e) {
       onToast?.(String(e));
+    } finally {
+      setSaving(false);
     }
   };
   return (
@@ -425,10 +470,10 @@ function McpForm({
         <textarea className="cc-editor cc-editor-short mono" spellCheck={false} value={json} onChange={(e) => setJson(e.target.value)} />
       </div>
       <div className="cc-form-acts">
-        <button type="button" className="btn btn-sm btn-primary" onClick={save}>
-          保存
+        <button type="button" className="btn btn-sm btn-primary" disabled={saving} onClick={save}>
+          {saving ? "保存中…" : "保存"}
         </button>
-        <button type="button" className="btn btn-sm" onClick={onCancel}>
+        <button type="button" className="btn btn-sm" disabled={saving} onClick={onCancel}>
           取消
         </button>
       </div>
@@ -468,6 +513,7 @@ function McpRow({
         type: null,
         command: null,
         args: null,
+        issue: null,
         error: String(e),
         timedOut: false,
         raw: "",
@@ -536,12 +582,24 @@ function McpRow({
         check && (
           <div className="cc-mcp-check">
             <div className="cc-mcp-check-head">
-              <Badge kind={check.status === "已连接" ? "ok" : check.status === "待审批" ? "star" : "danger"}>
+              {/* 未知状态（含 CLI 未来新增的）走中性 mut，不一律标红 */}
+              <Badge
+                kind={
+                  check.status === "已连接"
+                    ? "ok"
+                    : check.status === "待审批"
+                      ? "star"
+                      : check.status === "连接失败"
+                        ? "danger"
+                        : "mut"
+                }
+              >
                 {check.status ?? "未知"}
               </Badge>
               {check.scope && <span className="cc-hint">{check.scope}</span>}
             </div>
             {check.error && <div className="cc-error">{check.error}</div>}
+            {check.issue && <div className="cc-hint">Issue: {check.issue}</div>}
             {(check.type || check.command) && (
               <div className="mono cc-mcp-check-cmd">
                 {check.type}

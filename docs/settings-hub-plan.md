@@ -22,7 +22,7 @@ Phase 1 内**零新 npm 依赖**（纯 fs + 既有工具）；一切 spawn 类�
 | 域 | 读 | 写 |
 |---|---|---|
 | 插件已装清单 | `~/.claude/plugins/installed_plugins.json`（v2：`plugin@marketplace` → `[{scope,installPath,version,…}]`） | 只读（安装/卸载在 Phase 2 走 CLI） |
-| marketplace 注册表 | `~/.claude/plugins/known_marketplaces.json` | 只读（Phase 2） |
+| marketplace 注册表 | `~/.claude/plugins/known_marketplaces.json` + `settings.json → extraKnownMarketplaces`（+ 别名 `additionalMarketplaces`） | 读：两处并集（`mergeMarketplaces`）；写：走 CLI（add/remove/update），app 不手改这两个文件 |
 | 插件启停 | `~/.claude/settings.json → enabledPlugins`（布尔表） | 同左（只改布尔） |
 | MCP user scope | `~/.claude.json` 顶层 `mcpServers` | 同左 |
 | MCP local scope | `~/.claude.json → projects.<原始路径键>.mcpServers` | 同左 |

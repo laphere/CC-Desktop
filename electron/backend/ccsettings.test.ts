@@ -6,6 +6,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import {
   readEnabledPlugins,
+  readExtraKnownMarketplaces,
   readHooks,
   readPermissionRules,
   resolveDefaultMode,
@@ -144,5 +145,29 @@ describe("插件启停", () => {
     const ep = await readEnabledPlugins(tmp);
     expect(ep).toEqual({ "keep@me": false, "a@b": false, "new@one": true });
     expect(readUserSettings().env).toEqual({ A: "b" });
+  });
+});
+
+describe("extraKnownMarketplaces", () => {
+  it("读 canonical 键；缺键/坏结构返回空表", async () => {
+    writeUserSettings({ extraKnownMarketplaces: { m: { source: { source: "github", repo: "o/m" } } } });
+    expect(Object.keys(await readExtraKnownMarketplaces(tmp))).toEqual(["m"]);
+    writeUserSettings({});
+    expect(await readExtraKnownMarketplaces(tmp)).toEqual({});
+    writeUserSettings({ extraKnownMarketplaces: "坏" });
+    expect(await readExtraKnownMarketplaces(tmp)).toEqual({});
+  });
+
+  it("别名 additionalMarketplaces 一并读，canonical 优先（与 CLI 的别名解析一致）", async () => {
+    writeUserSettings({
+      additionalMarketplaces: {
+        aliasOnly: { source: { repo: "a/b" } },
+        both: { source: { repo: "old" } },
+      },
+      extraKnownMarketplaces: { both: { source: { repo: "new" } } },
+    });
+    const got = await readExtraKnownMarketplaces(tmp);
+    expect(Object.keys(got).sort()).toEqual(["aliasOnly", "both"]);
+    expect((got["both"] as Record<string, unknown>).source).toEqual({ repo: "new" });
   });
 });

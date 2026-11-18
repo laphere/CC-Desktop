@@ -381,8 +381,7 @@ export const api = {
     invoke<CliOutcome>("cc_plugin_uninstall", { plugin, ...(keepData ? { keepData: true } : {}) }),
   ccMarketplaceAdd: (source: string) => invoke<CliOutcome>("cc_marketplace_add", { source }),
   ccMarketplaceRemove: (name: string) => invoke<CliOutcome>("cc_marketplace_remove", { name }),
-  ccMarketplaceUpdate: (name?: string) =>
-    invoke<CliOutcome>("cc_marketplace_update", name ? { name } : {}),
+  ccMarketplaceUpdate: (name: string) => invoke<CliOutcome>("cc_marketplace_update", { name }),
   ccMcpList: (projectPath?: string) =>
     invoke<McpListView>("cc_mcp_list", projectPath ? { projectPath } : {}),
   ccMcpSave: (scope: McpScope, name: string, config: unknown, projectPath?: string) =>

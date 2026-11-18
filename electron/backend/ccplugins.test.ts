@@ -92,13 +92,14 @@ describe("启停", () => {
   });
 });
 
-// fixture 取自本机 CLI 2.1.325 的 `claude plugin details claude-hud@claude-hud` 实测输出
+// fixture 取自本机 CLI 2.1.325 的 `claude plugin details <id>` 实测输出。
+// ⚠️ 非零组件会在 (N) 后列出组件名（`Skills (1)  hud`），别把正则尾部锚死。
 const DETAILS_SAMPLE = `claude-hud 0.7.0
   Description: Real-time statusline showing context usage, active tools, running agents, and todo progress.
   Source: claude-hud@claude-hud
 
 Component inventory
-  Skills (0)
+  Skills (1)  hud
   Agents (0)
   Hooks (0)
   MCP servers (0)
@@ -116,7 +117,7 @@ describe("parsePluginDetails", () => {
     expect(d.description).toContain("Real-time statusline");
     expect(d.source).toBe("claude-hud@claude-hud");
     expect(d.components).toEqual([
-      { label: "Skills", count: 0 },
+      { label: "Skills", count: 1 },
       { label: "Agents", count: 0 },
       { label: "Hooks", count: 0 },
       { label: "MCP servers", count: 0 },
@@ -150,7 +151,7 @@ describe("parsePluginDetails", () => {
 });
 
 describe("parseCliJsonLine", () => {
-  it("取最后一行 JSON（前面混人类可读消息也算 ok）", () => {
+  it("从后往前找 JSON：消息在前、JSON 在后", () => {
     const r = parseCliJsonLine(
       "正在安装…\n完成\n{\"command\":\"install\",\"outcome\":\"ok\",\"plugin\":\"x\",\"message\":\"已安装\"}",
     );
@@ -158,6 +159,14 @@ describe("parseCliJsonLine", () => {
     expect(r.message).toBe("已安装");
     expect(r.failureCode).toBeNull();
     expect(r.raw).toContain("正在安装");
+  });
+
+  it("多行 JSON 时取最后一条（贴合 CLI「结果在最后一行」的契约）", () => {
+    const r = parseCliJsonLine(
+      "{\"event\":\"progress\",\"message\":\"克隆中\"}\n{\"command\":\"install\",\"outcome\":\"ok\",\"message\":\"已安装\"}",
+    );
+    expect(r.ok).toBe(true);
+    expect(r.message).toBe("已安装");
   });
 
   it("失败：带 failureCode", () => {

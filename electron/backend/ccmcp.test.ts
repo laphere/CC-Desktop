@@ -259,4 +259,12 @@ describe("parseMcpGet", () => {
     expect(r.status).toBeNull();
     expect(r.raw).toBe("");
   });
+
+  it("连接失败时保留 Issue 行（原因不再只躺在原始输出里）", () => {
+    const r = parseMcpGet(
+      "bad:\n  Scope: User config\n  Status: ✘ Failed to connect\n  Type: stdio\n  Command: bad\n  Issue: CONNECTION_CLOSED: Connection closed",
+    );
+    expect(r.status).toBe("连接失败");
+    expect(r.issue).toBe("CONNECTION_CLOSED: Connection closed");
+  });
 });

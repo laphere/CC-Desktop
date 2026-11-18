@@ -259,8 +259,8 @@ export interface IpcContract {
   cc_marketplace_add: { source: string };
   /** 移除 marketplace（清声明与 enabledPlugins 条目） */
   cc_marketplace_remove: { name: string };
-  /** 更新 marketplace（不传名字 = 全部） */
-  cc_marketplace_update: { name?: string };
+  /** 更新 marketplace（必须给名字：CLI 的 `update --json` 不接受「全部」） */
+  cc_marketplace_update: { name: string };
   /** MCP 三 scope 列表（project/local 为空当没传 projectPath） */
   cc_mcp_list: { projectPath?: string };
   cc_mcp_save: { scope: McpScope; projectPath?: string; name: string; config: unknown };

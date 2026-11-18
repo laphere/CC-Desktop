@@ -832,9 +832,7 @@ function registerIpc(): void {
   );
   handle("cc_marketplace_add", (p) => addMarketplace(ccStr(p.source, "marketplace 源")));
   handle("cc_marketplace_remove", (p) => removeMarketplace(ccStr(p.name, "marketplace 名")));
-  handle("cc_marketplace_update", (p) =>
-    updateMarketplace(p.name !== undefined && p.name !== "" ? String(p.name) : undefined),
-  );
+  handle("cc_marketplace_update", (p) => updateMarketplace(ccStr(p.name, "marketplace 名")));
   handle("cc_mcp_list", (p) =>
     listMcpServers(claudeConfigDir(), p.projectPath ? String(p.projectPath) : null));
   handle("cc_mcp_save", (p) =>
