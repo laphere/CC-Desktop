@@ -3,11 +3,23 @@
 // 「JSON 文本为唯一事实来源」的约定）；文本资源（技能/子代理/命令）为
 // 列表 + 点开编辑 + 删除进回收站。
 import { useEffect, useState } from "react";
-import { PuzzleIcon, WandIcon, BotIcon, TerminalIcon, PlugIcon, PencilIcon, XIcon } from "../Icons";
+import {
+  PuzzleIcon,
+  WandIcon,
+  BotIcon,
+  TerminalIcon,
+  PlugIcon,
+  PencilIcon,
+  TrashIcon,
+  XIcon,
+} from "../Icons";
+import { animateModalClose } from "../Modal";
+import ConfirmDialog from "../ConfirmDialog";
 import { api } from "../../lib/api";
 import type {
   AssetScope,
   AssetView,
+  CliOutcome,
   McpCheckResult,
   McpListView,
   McpScope,
@@ -29,6 +41,14 @@ import {
 } from "./shared";
 
 // ================= 插件 =================
+
+/** CLI 回执 message 常带多行（marketplace update 的日志），toast 是单行短句容器，
+ *  展示前折平；完整原文在后端 `CliOutcome.raw` 里。 */
+function oneLine(s: string | null): string | null {
+  if (s === null) return null;
+  const folded = s.replace(/\s*\r?\n\s*/g, " ").trim();
+  return folded || null;
+}
 
 /** 插件详情展开区（组件清单 + projected token cost；解析不出时至少给出原始输出） */
 function PluginDetailBody({ detail, loading }: { detail: PluginDetails | null; loading: boolean }) {
@@ -77,6 +97,17 @@ export function PluginsPage({ onToast }: { onToast?: (m: string) => void }) {
   const [detailId, setDetailId] = useState<string | null>(null);
   const [detail, setDetail] = useState<PluginDetails | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  // ---- 写操作（卸载 / marketplace 管理）：一律先确认，再走 CLI。
+  //  ⚠️ 这些 useState 必须留在 early return 之前（hooks 顺序不能随渲染变化） ----
+  const [confirm, setConfirm] = useState<
+    | { kind: "uninstall"; plugin: PluginView }
+    | { kind: "mkt-remove"; name: string }
+    | { kind: "mkt-update"; name: string }
+    | null
+  >(null);
+  const [addingMkt, setAddingMkt] = useState(false);
+  const [mktSource, setMktSource] = useState("");
+  const [mktBusy, setMktBusy] = useState(false);
   if (error || loading) return <LoadOrError loading={loading} error={error}>{null}</LoadOrError>;
   if (!data) return null;
 
@@ -119,9 +150,51 @@ export function PluginsPage({ onToast }: { onToast?: (m: string) => void }) {
     }
   };
 
+  /** 执行确认框里的动作；成功才关框（失败留着让用户看到原因） */
+  const runConfirm = async () => {
+    if (!confirm) return;
+    try {
+      let r: CliOutcome;
+      if (confirm.kind === "uninstall") r = await api.ccPluginUninstall(confirm.plugin.id);
+      else if (confirm.kind === "mkt-remove") r = await api.ccMarketplaceRemove(confirm.name);
+      else r = await api.ccMarketplaceUpdate(confirm.name);
+      if (r.ok) {
+        onToast?.(oneLine(r.message) ?? "完成");
+        setConfirm(null);
+        reload();
+      } else {
+        onToast?.(`${r.failureCode ? `[${r.failureCode}] ` : ""}${oneLine(r.message) ?? "操作失败"}`);
+      }
+    } catch (e) {
+      onToast?.(`操作失败：${String(e)}`);
+    }
+  };
+
+  const addMarketplace = async () => {
+    const src = mktSource.trim();
+    if (!src) return;
+    setMktBusy(true);
+    try {
+      const r = await api.ccMarketplaceAdd(src);
+      if (r.ok) {
+        onToast?.(oneLine(r.message) ?? "已添加");
+        setAddingMkt(false);
+        setMktSource("");
+        reload();
+      } else {
+        onToast?.(`${r.failureCode ? `[${r.failureCode}] ` : ""}${oneLine(r.message) ?? "添加失败"}`);
+      }
+    } catch (e) {
+      onToast?.(`添加失败：${String(e)}`);
+    } finally {
+      setMktBusy(false);
+    }
+  };
+
+
   return (
     <>
-      <H3 right={<span className="cc-hint">安装 / 更新 / 卸载在后续版本提供（走 claude plugin 命令）</span>}>
+      <H3 right={<span className="cc-hint">卸载见插件行；安装 / 更新在后续版本提供（走 claude plugin 命令）</span>}>
         已安装插件
       </H3>
       {data.plugins.length === 0 && (
@@ -157,12 +230,73 @@ export function PluginsPage({ onToast }: { onToast?: (m: string) => void }) {
               >
                 <PlugIcon size={11} />
               </button>
+              {p.installed && (
+                <button
+                  type="button"
+                  className="icon-btn icon-btn-sm cc-danger"
+                  title="卸载（从磁盘删除安装体，CLI 可重装）"
+                  onClick={() => setConfirm({ kind: "uninstall", plugin: p })}
+                >
+                  <TrashIcon size={11} />
+                </button>
+              )}
             </>
           }
         />
       ))}
 
-      <H3>Marketplace</H3>
+      <H3
+        right={
+          <button
+            type="button"
+            className="btn btn-sm"
+            disabled={mktBusy}
+            onClick={() => {
+              setAddingMkt((v) => !v);
+              setMktSource("");
+            }}
+          >
+            {addingMkt ? "取消添加" : "添加 marketplace"}
+          </button>
+        }
+      >
+        Marketplace
+      </H3>
+      {addingMkt && (
+        <div className="cc-form">
+          <div className="cc-form-row">
+            <label>源</label>
+            <input
+              className="cc-input mono"
+              placeholder="owner/repo、git/https URL 或本地路径"
+              value={mktSource}
+              onChange={(e) => setMktSource(e.target.value)}
+            />
+          </div>
+          <Hint>添加会拉取外部仓库并写入 settings.json 的 extraKnownMarketplaces，请只用可信来源。</Hint>
+          <div className="cc-form-acts">
+            <button
+              type="button"
+              className="btn btn-sm btn-primary"
+              disabled={mktBusy || !mktSource.trim()}
+              onClick={addMarketplace}
+            >
+              添加
+            </button>
+            <button
+              type="button"
+              className="btn btn-sm"
+              disabled={mktBusy}
+              onClick={() => {
+                setAddingMkt(false);
+                setMktSource("");
+              }}
+            >
+              取消
+            </button>
+          </div>
+        </div>
+      )}
       {data.marketplaces.length === 0 ? (
         <Hint>还没有配置任何 marketplace。</Hint>
       ) : (
@@ -172,19 +306,52 @@ export function PluginsPage({ onToast }: { onToast?: (m: string) => void }) {
             title={m.name}
             sub={m.repo ? `${m.sourceType ?? "source"}:${m.repo}` : m.installLocation ?? "—"}
             ops={
-              <button
-                type="button"
-                className="btn btn-sm"
-                disabled
-                title="更新 marketplace（后续版本：claude plugin marketplace update）"
-              >
-                更新
-              </button>
+              <>
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  onClick={() => setConfirm({ kind: "mkt-update", name: m.name })}
+                  title="更新 marketplace（claude plugin marketplace update，从源重新拉取克隆）"
+                >
+                  更新
+                </button>
+                <button
+                  type="button"
+                  className="icon-btn icon-btn-sm cc-danger"
+                  onClick={() => setConfirm({ kind: "mkt-remove", name: m.name })}
+                  title="移除 marketplace（清声明与启用条目）"
+                >
+                  <TrashIcon size={11} />
+                </button>
+              </>
             }
           />
         ))
       )}
       <EffectiveHint />
+
+      {confirm && (
+        <ConfirmDialog
+          title={
+            confirm.kind === "uninstall"
+              ? "卸载插件"
+              : confirm.kind === "mkt-remove"
+                ? "移除 marketplace"
+                : "更新 marketplace"
+          }
+          message={
+            confirm.kind === "uninstall"
+              ? `确定卸载「${confirm.plugin.name}」吗？将从磁盘删除安装体，CLI 可随时重装。`
+              : confirm.kind === "mkt-remove"
+                ? `确定移除 marketplace「${confirm.name}」吗？会同时删掉 settings 里的声明与该市场的启用条目，需重新添加才能恢复。`
+                : `从源重新拉取「${confirm.name}」的本地克隆？本地未推的改动可能被覆盖。`
+          }
+          okText={confirm.kind === "mkt-update" ? "更新" : confirm.kind === "mkt-remove" ? "移除" : "卸载"}
+          danger
+          onCancel={() => animateModalClose(() => setConfirm(null))}
+          onOk={runConfirm}
+        />
+      )}
     </>
   );
 }

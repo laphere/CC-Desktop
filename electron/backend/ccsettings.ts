@@ -241,6 +241,18 @@ export async function readEnabledPlugins(cfgDir: string): Promise<Record<string,
   return out;
 }
 
+/** 读用户级 settings.json 的 `extraKnownMarketplaces`（marketplace 的**声明**，
+ *  与 `~/.claude/plugins/known_marketplaces.json` 的本地登记是两处、需并集展示）。
+ *  返回 `{ 名字: 原条目 }`；缺键/坏结构一律当空表（marketplace add 会写这个键）。 */
+export async function readExtraKnownMarketplaces(
+  cfgDir: string,
+): Promise<Record<string, unknown>> {
+  const obj = await readSettings(claudeSettingsPathFrom(cfgDir));
+  const m = obj.extraKnownMarketplaces;
+  if (!m || typeof m !== "object" || Array.isArray(m)) return {};
+  return m as Record<string, unknown>;
+}
+
 /** 启停一个插件：只翻布尔位，表内其他键（含 false 的）原样保留 */
 export async function setPluginEnabled(
   cfgDir: string,

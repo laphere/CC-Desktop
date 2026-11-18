@@ -106,7 +106,15 @@ import {
   approveMcpServer,
   checkMcpServer,
 } from "./backend/ccmcp";
-import { listPlugins, pluginDetails, togglePlugin } from "./backend/ccplugins";
+import {
+  addMarketplace,
+  listPlugins,
+  pluginDetails,
+  removeMarketplace,
+  togglePlugin,
+  uninstallPlugin,
+  updateMarketplace,
+} from "./backend/ccplugins";
 import {
   listAssets,
   readAssetFile,
@@ -819,6 +827,14 @@ function registerIpc(): void {
   handle("cc_plugin_list", () => listPlugins(claudeConfigDir()));
   handle("cc_plugin_toggle", (p) => togglePlugin(claudeConfigDir(), ccStr(p.id, "插件 id"), p.enabled === true));
   handle("cc_plugin_details", (p) => pluginDetails(ccStr(p.name, "插件名")));
+  handle("cc_plugin_uninstall", (p) =>
+    uninstallPlugin(ccStr(p.plugin, "插件"), { keepData: p.keepData === true }),
+  );
+  handle("cc_marketplace_add", (p) => addMarketplace(ccStr(p.source, "marketplace 源")));
+  handle("cc_marketplace_remove", (p) => removeMarketplace(ccStr(p.name, "marketplace 名")));
+  handle("cc_marketplace_update", (p) =>
+    updateMarketplace(p.name !== undefined && p.name !== "" ? String(p.name) : undefined),
+  );
   handle("cc_mcp_list", (p) =>
     listMcpServers(claudeConfigDir(), p.projectPath ? String(p.projectPath) : null));
   handle("cc_mcp_save", (p) =>

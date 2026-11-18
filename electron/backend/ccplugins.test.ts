@@ -4,7 +4,13 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { listPlugins, parsePluginDetails, togglePlugin } from "./ccplugins";
+import {
+  listPlugins,
+  mergeMarketplaces,
+  parseCliJsonLine,
+  parsePluginDetails,
+  togglePlugin,
+} from "./ccplugins";
 
 let tmp: string;
 
@@ -140,5 +146,82 @@ describe("parsePluginDetails", () => {
     const d = parsePluginDetails(weird);
     expect(d.raw).toContain("inattendue");
     expect(d.components).toEqual([]);
+  });
+});
+
+describe("parseCliJsonLine", () => {
+  it("取最后一行 JSON（前面混人类可读消息也算 ok）", () => {
+    const r = parseCliJsonLine(
+      "正在安装…\n完成\n{\"command\":\"install\",\"outcome\":\"ok\",\"plugin\":\"x\",\"message\":\"已安装\"}",
+    );
+    expect(r.ok).toBe(true);
+    expect(r.message).toBe("已安装");
+    expect(r.failureCode).toBeNull();
+    expect(r.raw).toContain("正在安装");
+  });
+
+  it("失败：带 failureCode", () => {
+    const r = parseCliJsonLine('{"command":"uninstall","outcome":"failed","message":"未安装","failureCode":"not_installed"}');
+    expect(r.ok).toBe(false);
+    expect(r.failureCode).toBe("not_installed");
+  });
+
+  it("JSON 在前、人类消息在后（实测 uninstall 失败的顺序）", () => {
+    const r = parseCliJsonLine(
+      '{"command":"uninstall","outcome":"failed","plugin":"x@n","scope":"user","message":"not found","failureCode":"not_installed"}\n✘ Failed to uninstall plugin "x@n": not found',
+    );
+    expect(r.ok).toBe(false);
+    expect(r.failureCode).toBe("not_installed");
+    expect(r.message).toBe("not found");
+  });
+
+  it("只有人类消息、没有 JSON：兜底成失败", () => {
+    const r = parseCliJsonLine("✘ Failed to uninstall: whatever");
+    expect(r.ok).toBe(false);
+    expect(r.failureCode).toBeNull();
+    expect(r.message).toContain("whatever");
+  });
+
+  it("非 JSON / 无输出：按失败返回原文，不抛", () => {
+    const r = parseCliJsonLine("一些奇怪输出");
+    expect(r.ok).toBe(false);
+    expect(r.message).toContain("奇怪输出");
+    expect(parseCliJsonLine("   ").ok).toBe(false);
+  });
+});
+
+describe("mergeMarketplaces", () => {
+  const known = {
+    a: { source: { source: "github", repo: "o/a" }, installLocation: "/x/a", lastUpdated: "t1" },
+    b: { source: { source: "github", repo: "o/b" }, installLocation: "/x/b" },
+  };
+  const extra = {
+    b: { source: { source: "github", repo: "o/b-other" } },
+    c: { source: { source: "git", repo: "https://host/c" } },
+  };
+
+  it("两处并集，known 优先；settings 独有条目也出现", () => {
+    const out = mergeMarketplaces(known, extra);
+    expect(out.map((m) => m.name)).toEqual(["a", "b", "c"]);
+    const b = out.find((m) => m.name === "b")!;
+    expect(b.installLocation).toBe("/x/b"); // known 的字段保留
+    expect(b.repo).toBe("o/b"); // known 优先，不被 extra 覆盖
+    expect(out.find((m) => m.name === "c")!.sourceType).toBe("git");
+  });
+
+  it("extra 补 known 缺的 source；坏结构当空", () => {
+    const out = mergeMarketplaces(
+      { x: { installLocation: "/x" } },
+      { x: { source: { source: "github", repo: "o/x" } }, y: null },
+    );
+    const x = out.find((m) => m.name === "x")!;
+    expect(x.sourceType).toBe("github");
+    expect(x.installLocation).toBe("/x");
+    expect(out.find((m) => m.name === "y")!.sourceType).toBeNull();
+  });
+
+  it("known 缺失/为空时只用 extra", () => {
+    expect(mergeMarketplaces(null, extra).map((m) => m.name)).toEqual(["b", "c"]);
+    expect(mergeMarketplaces(null, {}).length).toBe(0);
   });
 });

@@ -16,6 +16,7 @@ import type {
   CcHooksRead,
   CcPermsRead,
   CcScope,
+  CliOutcome,
   DisabledHookEntry,
   CleanResult,
   DiskUsage,
@@ -376,6 +377,12 @@ export const api = {
   ccPluginToggle: (id: string, enabled: boolean) =>
     invoke<void>("cc_plugin_toggle", { id, enabled }),
   ccPluginDetails: (name: string) => invoke<PluginDetails>("cc_plugin_details", { name }),
+  ccPluginUninstall: (plugin: string, keepData?: boolean) =>
+    invoke<CliOutcome>("cc_plugin_uninstall", { plugin, ...(keepData ? { keepData: true } : {}) }),
+  ccMarketplaceAdd: (source: string) => invoke<CliOutcome>("cc_marketplace_add", { source }),
+  ccMarketplaceRemove: (name: string) => invoke<CliOutcome>("cc_marketplace_remove", { name }),
+  ccMarketplaceUpdate: (name?: string) =>
+    invoke<CliOutcome>("cc_marketplace_update", name ? { name } : {}),
   ccMcpList: (projectPath?: string) =>
     invoke<McpListView>("cc_mcp_list", projectPath ? { projectPath } : {}),
   ccMcpSave: (scope: McpScope, name: string, config: unknown, projectPath?: string) =>

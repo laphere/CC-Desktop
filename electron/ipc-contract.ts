@@ -10,7 +10,7 @@ import type { ChatImage, ChatPermissionMode } from "./backend/chat";
 import type { CcScope, DefaultModeChain, HooksMap, PermissionRules } from "./backend/ccsettings";
 import type { DisabledHookEntry } from "./backend/ccstate";
 import type { McpCheckResult, McpListView, McpScope, McpServerView } from "./backend/ccmcp";
-import type { PluginDetails, PluginListView, PluginView } from "./backend/ccplugins";
+import type { CliOutcome, PluginDetails, PluginListView, PluginView } from "./backend/ccplugins";
 import type { AssetKind, AssetScope, AssetView, ClaudeMdView } from "./backend/ccassets";
 import type { CleanResult, DiskUsage } from "./backend/ccdisk";
 
@@ -25,6 +25,7 @@ export type {
   McpListView,
   McpScope,
   McpServerView,
+  CliOutcome,
   PluginDetails,
   PluginListView,
   PluginView,
@@ -252,6 +253,14 @@ export interface IpcContract {
   cc_plugin_toggle: { id: string; enabled: boolean };
   /** 插件详情（组件清单 + projected token cost），只读 CLI */
   cc_plugin_details: { name: string };
+  /** 卸载插件（破坏性：从磁盘删除安装体） */
+  cc_plugin_uninstall: { plugin: string; keepData?: boolean };
+  /** 添加 marketplace（拉取外部仓库，写 settings 声明） */
+  cc_marketplace_add: { source: string };
+  /** 移除 marketplace（清声明与 enabledPlugins 条目） */
+  cc_marketplace_remove: { name: string };
+  /** 更新 marketplace（不传名字 = 全部） */
+  cc_marketplace_update: { name?: string };
   /** MCP 三 scope 列表（project/local 为空当没传 projectPath） */
   cc_mcp_list: { projectPath?: string };
   cc_mcp_save: { scope: McpScope; projectPath?: string; name: string; config: unknown };
@@ -367,6 +376,10 @@ export const IPC_CHANNELS = [
   "cc_plugin_list",
   "cc_plugin_toggle",
   "cc_plugin_details",
+  "cc_plugin_uninstall",
+  "cc_marketplace_add",
+  "cc_marketplace_remove",
+  "cc_marketplace_update",
   "cc_mcp_list",
   "cc_mcp_save",
   "cc_mcp_delete",

@@ -8,7 +8,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { readJsonObjectFile } from "./ccjson";
-import { readEnabledPlugins, setPluginEnabled } from "./ccsettings";
+import { readEnabledPlugins, readExtraKnownMarketplaces, setPluginEnabled } from "./ccsettings";
 import { runClaude } from "./cccli";
 
 export interface PluginView {
@@ -63,10 +63,11 @@ function str(v: unknown): string | null {
 }
 
 export async function listPlugins(cfgDir: string): Promise<PluginListView> {
-  const [installedRaw, enabled, marketplacesRaw] = await Promise.all([
+  const [installedRaw, enabled, marketplacesRaw, extraKnown] = await Promise.all([
     readJsonObjectFile(installedPluginsPath(cfgDir)).catch(() => null),
     readEnabledPlugins(cfgDir),
     readJsonObjectFile(knownMarketplacesPath(cfgDir)).catch(() => null),
+    readExtraKnownMarketplaces(cfgDir).catch(() => ({})),
   ]);
 
   // installed_plugins.json 的 v2 结构：{ version: 2, plugins: { "id@mkt": [记录…] } }
@@ -98,20 +99,8 @@ export async function listPlugins(cfgDir: string): Promise<PluginListView> {
     })
     .sort((a, b) => a.id.localeCompare(b.id));
 
-  // known_marketplaces.json：{ 名字: { source: { source, repo }, installLocation, lastUpdated } }
-  const marketplaces: MarketplaceView[] = Object.entries(marketplacesRaw ?? {}).map(([name, v]) => {
-    const m = (v && typeof v === "object" && !Array.isArray(v) ? v : {}) as Record<string, unknown>;
-    const source = (m.source && typeof m.source === "object" && !Array.isArray(m.source)
-      ? m.source
-      : {}) as Record<string, unknown>;
-    return {
-      name,
-      sourceType: str(source.source),
-      repo: str(source.repo),
-      installLocation: str(m.installLocation),
-      lastUpdated: str(m.lastUpdated),
-    };
-  }).sort((a, b) => a.name.localeCompare(b.name));
+  // marketplace 两处取并集：本地登记（字段全）+ settings 声明（补 source）
+  const marketplaces = mergeMarketplaces(marketplacesRaw, extraKnown);
 
   return { plugins, marketplaces };
 }
@@ -250,4 +239,122 @@ export async function pluginDetails(name: string): Promise<PluginDetails> {
     return { ...EMPTY_DETAILS, error: `退出码 ${r.code ?? "未知"}`, raw: r.stderr };
   }
   return parsePluginDetails(out);
+}
+
+// ---------------- marketplace 数据源并集 ----------------
+
+/** `known_marketplaces.json`（本地登记，含 installLocation/lastUpdated）与
+ *  `settings.json → extraKnownMarketplaces`（声明，仅 source）按名合并。
+ *  known 条目优先（字段全），settings 只补 source 字段；两边都没有的字段留 null。
+ *  纯函数，单测覆盖。 */
+export function mergeMarketplaces(
+  knownRaw: Record<string, unknown> | null,
+  extra: Record<string, unknown>,
+): MarketplaceView[] {
+  const merged = new Map<string, MarketplaceView>();
+  const srcOf = (v: unknown): { sourceType: string | null; repo: string | null } => {
+    const m = (v && typeof v === "object" && !Array.isArray(v) ? v : {}) as Record<string, unknown>;
+    const source = (m.source && typeof m.source === "object" && !Array.isArray(m.source)
+      ? m.source
+      : {}) as Record<string, unknown>;
+    return { sourceType: str(source.source), repo: str(source.repo) };
+  };
+
+  for (const [name, v] of Object.entries(knownRaw ?? {})) {
+    const m = (v && typeof v === "object" && !Array.isArray(v) ? v : {}) as Record<string, unknown>;
+    merged.set(name, {
+      name,
+      ...srcOf(v),
+      installLocation: str(m.installLocation),
+      lastUpdated: str(m.lastUpdated),
+    });
+  }
+  for (const [name, v] of Object.entries(extra)) {
+    const { sourceType, repo } = srcOf(v);
+    const cur = merged.get(name);
+    if (cur) merged.set(name, { ...cur, sourceType: cur.sourceType ?? sourceType, repo: cur.repo ?? repo });
+    else merged.set(name, { name, sourceType, repo, installLocation: null, lastUpdated: null });
+  }
+  return [...merged.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+// ---------------- 写操作（marketplace 管理 / 插件卸载，走 CLI）----------------
+
+export interface CliOutcome {
+  ok: boolean;
+  message: string | null;
+  failureCode: string | null;
+  /** CLI 原始输出（含人类可读消息），供展示与排障 */
+  raw: string;
+}
+
+/** 解析 `claude plugin ... --json` 的输出：**一行紧凑 JSON**，但与人类可读消息的先后
+ *  顺序不固定——实测 marketplace update 成功只有 JSON 一行，uninstall 失败是「JSON 在前、
+ *  ✘ 消息在后」，install 则是「消息在前、JSON 在后」。故逐行找**能 parse 且含
+ *  outcome/command** 的那条，不依赖位置。解析失败按失败返回（原文进 message/raw），
+ *  不抛——命令失败不该让界面崩。 */
+export function parseCliJsonLine(text: string): CliOutcome {
+  const raw = text.trim();
+  for (const line of raw.split(/\r?\n/)) {
+    const t = line.trim();
+    if (!t.startsWith("{")) continue;
+    try {
+      const o = JSON.parse(t) as Record<string, unknown>;
+      if (typeof o["outcome"] !== "string" && typeof o["command"] !== "string") continue;
+      return {
+        ok: o["outcome"] === "ok",
+        message: typeof o["message"] === "string" ? o["message"] : null,
+        failureCode: typeof o["failureCode"] === "string" ? o["failureCode"] : null,
+        raw,
+      };
+    } catch {
+      // 该行不是合法 JSON（或被截断），继续找下一行
+    }
+  }
+  return { ok: false, message: raw || "无输出", failureCode: null, raw };
+}
+
+/** 把 CLI message 里的换行折成单行（toast 是单行短句容器，完整原文在 raw 里可查） */
+export function oneLine(s: string | null): string | null {
+  if (s === null) return null;
+  const folded = s.replace(/\s*\r?\n\s*/g, " ").trim();
+  return folded || null;
+}
+
+async function runPluginCli(args: string[]): Promise<CliOutcome> {
+  const r = await runClaude(args);
+  const text = [r.stdout, r.stderr].filter(Boolean).join("\n");
+  if (r.timedOut) return { ok: false, message: "命令超时", failureCode: null, raw: text };
+  return parseCliJsonLine(text);
+}
+
+/** 添加 marketplace（source 可以是 owner/repo、git/https URL 或本地路径）。
+ *  ⚠️ CLI 会拉取外部仓库并写 `settings.json → extraKnownMarketplaces`，调用方必须二次确认。 */
+export function addMarketplace(source: string): Promise<CliOutcome> {
+  return runPluginCli(["plugin", "marketplace", "add", source, "--json"]);
+}
+
+/** 移除 marketplace（同时清掉各 settings 里的声明与 enabledPlugins 条目）——破坏性。 */
+export function removeMarketplace(name: string): Promise<CliOutcome> {
+  return runPluginCli(["plugin", "marketplace", "remove", name, "--json"]);
+}
+
+/** 更新 marketplace（不传名字 = 更新全部）；从源重新拉取克隆。 */
+export function updateMarketplace(name?: string): Promise<CliOutcome> {
+  return runPluginCli(["plugin", "marketplace", "update", ...(name ? [name] : []), "--json"]);
+}
+
+/** 卸载插件。⚠️ 从磁盘删除安装体——破坏性；`--json` 与 `--prune` 互斥故不暴露 prune。 */
+export function uninstallPlugin(
+  plugin: string,
+  opts: { keepData?: boolean } = {},
+): Promise<CliOutcome> {
+  return runPluginCli([
+    "plugin",
+    "uninstall",
+    plugin,
+    "--json",
+    "-y",
+    ...(opts.keepData ? ["--keep-data"] : []),
+  ]);
 }
