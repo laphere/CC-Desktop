@@ -401,7 +401,15 @@ export async function checkMcpServer(
   }
   const out = r.stdout || r.stderr;
   if (r.code !== 0 && !r.stdout) {
-    return { ...EMPTY_CHECK, name, status: "连接失败", error: `退出码 ${r.code ?? "未知"}`, raw: r.stderr };
+    // 错误写 stderr 时仍把 `Issue:` 行提出来（否则失败原因只躺在 raw 里）
+    return {
+      ...EMPTY_CHECK,
+      name,
+      status: "连接失败",
+      error: `退出码 ${r.code ?? "未知"}`,
+      issue: parseMcpGet(r.stderr).issue,
+      raw: r.stderr,
+    };
   }
   const parsed = parseMcpGet(out);
   return { ...parsed, name: parsed.name ?? name };

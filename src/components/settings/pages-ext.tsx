@@ -112,14 +112,16 @@ export function PluginsPage({ onToast }: { onToast?: (m: string) => void }) {
   const [pageError, setPageError] = useState<string | null>(null);
   /** 详情请求序号：只接受最后一条的结果，避免「点 A 再点 B，A 的结果落到 B 行」 */
   const detailReqRef = useRef(0);
-  if (error || loading) return <LoadOrError loading={loading} error={error}>{null}</LoadOrError>;
-  if (!data) return null;
-
-  // 列表刷新（含卸载/启停后）清掉展开的详情，避免旧数据留在原行
+  // 列表刷新（含卸载/启停后）清掉展开的详情，避免旧数据留在原行。
+  // ⚠️ 与上面所有 hooks 一样必须在 early return **之前**——否则首次 loading 态直接
+  // return、数据到达后才渲染这个 effect，hooks 数量变化会让 React 抛
+  // 「Rendered more hooks than during the previous render」并整树崩（typecheck 拦不住）。
   useEffect(() => {
     setDetailId(null);
     setDetail(null);
   }, [data]);
+  if (error || loading) return <LoadOrError loading={loading} error={error}>{null}</LoadOrError>;
+  if (!data) return null;
 
   /** 展开/收起某插件的详情（再点一次收起；详情失败时后端回 error + raw，不抛） */
   const openDetail = async (p: PluginView) => {
@@ -127,6 +129,7 @@ export function PluginsPage({ onToast }: { onToast?: (m: string) => void }) {
       detailReqRef.current++; // 作废在飞的那条
       setDetailId(null);
       setDetail(null);
+      setDetailLoading(false); // 在飞请求的 finally 因 ref 不匹配不会复位，这里补
       return;
     }
     const req = ++detailReqRef.current;
@@ -176,6 +179,7 @@ export function PluginsPage({ onToast }: { onToast?: (m: string) => void }) {
       else r = await api.ccMarketplaceUpdate(confirm.name);
       if (r.ok) {
         onToast?.(oneLine(r.message) ?? "完成");
+        setPageError(null); // 成功后清掉上一次的失败原因，免得旧错误一直挂在页顶
         // 成功关闭也走弹层出场动画；force=true 是因为 ConfirmDialog 的 busy 此刻
         // 还没清，不 force 会被 canClose 吞掉 → 「点确定不关、再点重跑一遍」
         animateModalClose(() => setConfirm(null), true);

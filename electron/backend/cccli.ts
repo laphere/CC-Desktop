@@ -78,20 +78,27 @@ export function run(
       resolve(r);
     };
     const killTree = () => {
+      const pid = child.pid;
+      if (!pid) return; // 没起来就没有树可杀
       if (win) {
-        // taskkill /T 连子孙一起杀；spawn 异步发出即可（进程随即要退）
+        // taskkill /T 连子孙一起杀（Windows 无进程组语义）；spawn 异步发出即可
         try {
           spawn(
             process.env.ComSpec || "cmd.exe",
-            ["/c", "taskkill", "/pid", String(child.pid ?? ""), "/T", "/F"],
+            ["/c", "taskkill", "/pid", String(pid), "/T", "/F"],
             { windowsHide: true, stdio: "ignore" },
           );
         } catch {
-          // 忽略：随后再尝试直接 kill
+          try {
+            child.kill();
+          } catch {
+            // 已退出
+          }
         }
-      } else if (child.pid) {
+      } else {
+        // detached 让子进程当组长，kill(-pid) 杀整棵树
         try {
-          process.kill(-child.pid, "SIGKILL");
+          process.kill(-pid, "SIGKILL");
         } catch {
           try {
             child.kill();
