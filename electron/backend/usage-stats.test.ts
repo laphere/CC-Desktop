@@ -19,11 +19,16 @@ import {
   type StatsLedger,
   type UsageRow,
 } from "./usage-stats";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-// 工具：创建临时目录（不碰真实 ~/.claude）
+// 工具：创建临时目录（不碰真实 ~/.claude）。建过的目录登记下来，由 afterEach 统一删除——
+// 否则每跑一次测试就会在系统临时目录里累积一批空目录/夹具。
+const createdRoots: string[] = [];
+
 function tmpDir(prefix: string): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), `usagestats-${prefix}-`));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `usagestats-${prefix}-`));
+  createdRoots.push(dir);
+  return dir;
 }
 
 function row(p: Partial<UsageRow>): UsageRow {
@@ -58,6 +63,17 @@ function entry(p: Partial<LedgerEntry> & { perDay: Record<string, [number, numbe
 }
 
 beforeEach(() => clearUsageCache());
+
+afterEach(() => {
+  for (const dir of createdRoots.splice(0)) {
+    // 清理失败不连累用例结论（Windows 偶发文件占用，目录留给系统回收）。
+    try {
+      fs.rmSync(dir, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
+  }
+});
 
 describe("better_usage_row 代表行取舍", () => {
   it("只有中间行：取 token 更大者", () => {
