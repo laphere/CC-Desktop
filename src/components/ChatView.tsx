@@ -24,7 +24,7 @@ import { api } from "../lib/api";
 import { settleStaleThinking } from "../lib/chat-items";
 import { highlightKeyword } from "../lib/keyword-highlight";
 import { viewTransition } from "../lib/view-transition";
-import { cacheHitRate, fmtHitRate } from "../lib/token-stats";
+import { cacheHitRate, fmtHitRateCompact, fmtTokensCompact, shortModel } from "../lib/token-stats";
 import {
   apiRetryDelayMs,
   apiRetryStatusText,
@@ -63,6 +63,7 @@ import {
 import { PREVIEW_MAX_BYTES } from "../../electron/ipc-contract";
 import {
   ArrowDownIcon,
+  ArrowLeftRightIcon,
   ArrowUpIcon,
   ChevronDownIcon,
   ChevronUpIcon,
@@ -190,11 +191,11 @@ function addUsage(a: ChatUsage, b: ChatUsage): ChatUsage {
   };
 }
 
-/** 头部统计行尾部的缓存段：「 · 缓存读取 10.5M · 缓存命中率 92.1%」。
- *  两个字段同一个闸门（cacheR > 0）——没读过缓存时既不该有「缓存读取 0」，
- *  也不该有「命中率 0.0%」（首次冷启动轮的正常形态，不是异常要报出来）。
- *  命中率分子分母必须取**同一口径**的三桶（输入 / 读缓存 / 写缓存），
- *  见 lib/token-stats.ts 的注释 */
+/** 头部统计行尾部的缓存段：「 缓存10.5M 92.1%」（自带前导空格，与前面各段以空格
+ *  相接；命中率为 null 时只有缓存量）。两个字段同一个闸门（cacheR > 0）——没读过
+ *  缓存时既不该有「缓存0」，也不该有「99%」（首次冷启动轮的正常形态，不是异常要
+ *  报出来）。裸百分比紧跟缓存量 = 命中率；分子分母必须取**同一口径**的三桶
+ *  （输入 / 读缓存 / 写缓存），见 lib/token-stats.ts 的注释 */
 function cacheStatSuffix(inTok: number, cacheR: number, cacheW: number): string {
   if (!(cacheR > 0)) return "";
   const rate = cacheHitRate({
@@ -202,7 +203,19 @@ function cacheStatSuffix(inTok: number, cacheR: number, cacheW: number): string 
     cacheReadInputTokens: cacheR,
     cacheCreationInputTokens: cacheW,
   });
-  return ` · 缓存读取 ${fmtTokens(cacheR)}${rate == null ? "" : ` · 缓存命中率 ${fmtHitRate(rate)}`}`;
+  return ` 缓存${fmtTokensCompact(cacheR)}${rate == null ? "" : ` ${fmtHitRateCompact(rate)}`}`;
+}
+
+/** 取消息数组里最后一条带模型名的 assistant 消息的模型名（找不到返回 null）。
+ *  会话「基准模型」的唯一取法：jsonl 每条 assistant 行都带 model，最后一条 =
+ *  会话最近一次实际生效的模型。只在**历史整窗加载**时调用（打开/刷新共用），
+ *  分页与搜索跳转的增量窗口不得碰它 */
+function lastAssistantModel(msgs: SessionMessage[]): string | null {
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const m = msgs[i];
+    if (m.kind === "assistant" && m.model) return m.model;
+  }
+  return null;
 }
 
 /** 毫秒 → 「1m20s」/「45s」。子代理心跳用（task_progress 的 usage.duration_ms）。
@@ -333,7 +346,14 @@ type StreamEntry =
       isError: boolean;
       resultBlock: ContentBlock | null;
     }
-  | { t: "orphanResult"; key: string; block: ContentBlock };
+  | { t: "orphanResult"; key: string; block: ContentBlock }
+  | {
+      /** 「模型已切换」分隔提示（实时区专属，不落 jsonl）：新模型时代在流里的起点 */
+      t: "modelSwitch";
+      key: string;
+      from: string;
+      to: string;
+    };
 
 /** 「关键结果」工具：产出不折进活动组，直接在会话流里展开成卡片。
  *  这类工具的交付物在 tool_use 的 input 里（tool_result 只是回执），折进两层
@@ -398,6 +418,11 @@ export default function ChatView({
 }: Props) {
   // ---------- 实时流（本次 sitting 的消息） ----------
   const [items, setItems] = useState<ChatItem[]>([]);
+  /** 会话基准模型（完整串）：历史整窗加载（打开/刷新共用一条路）时种自 jsonl 尾部，
+   *  此后只随 session_ready 更新。⚠️ 刻意用 ref 不从 history 派生——历史窗口会移动
+   *  （搜索跳转整窗替换、分页前后拼），派生值会变成「窗口尾」的模型误导只读页；
+   *  新对话 sitting 历史恒空，派生恒 null 会把热切提示整个吞掉 */
+  const lastModelRef = useRef<string | null>(null);
   const [input, setInput] = useState("");
   /** 待发送的图片附件（粘贴/拖拽进入，随消息发送后清空） */
   const [pendingImages, setPendingImages] = useState<ChatImage[]>([]);
@@ -675,7 +700,7 @@ export default function ChatView({
   // ---------- 事件处理 ----------
 
   /** 轮末重读 jsonl 统计（turn_end 调）。stats 是历史加载时的**快照**，LLM 回完内容
-   *  不会自己变——不重读的话头部「N 条消息 · 总计…」要等关掉重开才更新（2026-09-27
+   *  不会自己变——不重读的话头部统计行要等关掉重开才更新（2026-09-27
    *  用户实测）。只读统计、不动渲染数据源（历史区/实时区都不碰），与收编的
    *  skipNextHistoryLoadRef 不冲突。延迟 400ms 给 CLI 落盘让路：result 帧与 jsonl
    *  尾部行几乎同时写，抢跑会读到旧一拍（落后一拍无害，下一轮自愈）。 */
@@ -703,6 +728,23 @@ export default function ChatView({
     [],
   );
 
+  /** 往实时区插一条「模型已切换」分隔条目。插入点在 updater 里按 prev 现算
+   *  （纯函数，StrictMode 双调安全）：末尾若是本轮刚发、尚无回复的用户气泡 →
+   *  插它上方（新模型时代从这条消息开始）；否则追加末尾（空闲/轮中热切，落在
+   *  两轮内容之间）。顺带 settle 仍在流式的条目——轮中热切时旧块的光标不该
+   *  跨过切换线继续闪。⚠️ 不计 liveMsgs：它不是消息，不进「N 条消息」的分子 */
+  const insertModelSwitch = useCallback((from: string, to: string) => {
+    const id = nextItemId++;
+    setItems((p) => {
+      const settled = settleStreamingItems(p);
+      const last = settled[settled.length - 1];
+      const at = last && last.kind === "user" ? settled.length - 1 : settled.length;
+      const next = settled.slice();
+      next.splice(at, 0, { id, kind: "model_switch", from, to });
+      return next;
+    });
+  }, []);
+
   const handleEvent = useCallback((ev: ChatEvent) => {
     // 模型一开口，「按停止把刚发的消息退回输入框」的窗口就关了（见 recallSent）
     if (REPLY_EVENTS.has(ev.type)) replyStartedRef.current = true;
@@ -711,6 +753,22 @@ export default function ChatView({
         setRealSessionId(ev.sessionId);
         realSessionIdRef.current = ev.sessionId;
         if (ev.model) setModelName(ev.model);
+        // 模型切换检测：与会话基准比较（历史整窗加载时种自 jsonl 尾部，此后随每次
+        // init 更新——每轮开头都有 init，热切成功后 CLI 立即补发一帧，两条路都进这里）。
+        // ① 空模型不清基准：init 帧允许缺 model（翻译层透传 null），清了会把后续
+        //    真回声的提示吞掉；② 判等走归一化：jsonl 行与 init 帧的模型串格式没有
+        //    逐字一致的保证（实测 [1m]/[1M] 大小写即两回事又肉眼不可辨），逐字比
+        //    会造出「X → X」假提示
+        {
+          const prevModel = lastModelRef.current;
+          if (ev.model) {
+            const norm = (m: string) => shortModel(m).toLowerCase();
+            if (prevModel != null && norm(prevModel) !== norm(ev.model)) {
+              insertModelSwitch(prevModel, ev.model);
+            }
+            lastModelRef.current = ev.model;
+          }
+        }
         // 取不到就当没有（CLI 只在 Remote Control 类宿主上发这个字段）
         setEffort(ev.effort ?? null);
         // 以 CLI init 上报的实际生效模式为准（校正显示；并复位改选标记，
@@ -1016,12 +1074,12 @@ export default function ChatView({
         turnLiveRef.current = null; // 轮次边界：活值清零（下一条 message_delta 重新计）
         setTurnLive(null);
         setThinkingTokens(null);
-        // 头部「N 条消息 · 总计…」同步到最新：轮末从 jsonl 重读一次统计（见
+        // 头部统计行同步到最新：轮末从 jsonl 重读一次统计（见
         // scheduleStatsRefresh 注释）。挂 session（sessionFileRef）：新对话收编前
         // 没有文件可读，走 statLine 的实时兜底分支，不进这条路
         scheduleStatsRefresh();
         // 已用上下文**不在这结算**：result.usage 是本轮全部 API 调用的 input 三项之和
-        // （头部「总计」的口径），一轮多次工具往返会远超窗口——拿它当上下文会在轮末
+        // （头部统计行的 token 口径），一轮多次工具往返会远超窗口——拿它当上下文会在轮末
         // 把进度条写满（2026-11-07 用户实测 18% → 100%）。收口由后端轮末拉的 summary
         // 读数负责（context_usage 事件，与轮内磁盘真值同源同值，曲线不跳）。
         // 用户主动中断（停止钮 / Esc）时，CLI 回的 result 是 error_during_execution，
@@ -1064,7 +1122,7 @@ export default function ChatView({
         onToast("对话错误：" + ev.message);
         break;
     }
-  }, [onToast, scheduleStatsRefresh]);
+  }, [onToast, scheduleStatsRefresh, insertModelSwitch]);
 
   // ---------- 历史 jsonl 加载 ----------
 
@@ -1126,6 +1184,8 @@ export default function ChatView({
     if (!session) {
       setHistory([]);
       setStats(null);
+      // 新对话 tab：没有历史就没有基准模型，首帧 init 只种值不提示
+      lastModelRef.current = null;
       setSearchResults(null);
       setPrompts([]);
       setActivePromptKey(null);
@@ -1156,6 +1216,8 @@ export default function ChatView({
         setHasMore(data.hasMore);
         setTotal(data.total);
         setStats(data.stats);
+        // 基准模型只在整窗加载（打开/刷新）时重种：分页与搜索跳转不经过这里
+        lastModelRef.current = lastAssistantModel(data.messages);
       })
       .catch(() => onToast("加载历史消息失败"))
       .finally(() => {
@@ -2454,6 +2516,9 @@ export default function ChatView({
             block: { kind: "tool_result", text: it.text, isError: it.isError },
           });
           break;
+        case "model_switch":
+          entries.push({ t: "modelSwitch", key: `l${it.id}`, from: it.from, to: it.to });
+          break;
       }
     }
     return entries;
@@ -2605,8 +2670,12 @@ export default function ChatView({
    *  轮内两分支都把 turnLive 叠上去：历史分支**不叠** usage（stats 轮末重读会把
    *  sitting 已落盘的消息吃进去，再叠 usage 就双计——只叠本轮尚未落盘的 turnLive）；
    *  兜底分支叠完整 liveTotal。⚠️ 轮末那 ~400ms（turnLive 已清、stats 未回）历史分支
-   *  会先跌回旧快照再涨上来——落后一拍，量级看不出，但不是严格的「无缝」 */
+   *  会先跌回旧快照再涨上来——落后一拍，量级看不出，但不是严格的「无缝」。
+   *  格式为紧凑分段（「388条消息 共21.9M 输入211K 输出62K 缓存21.6M 99%」，段间空格，
+   *  见 .viewer-stats 的注释）；model 段只在只读页显示（对话态模型在底栏选择器上，
+   *  重复一份没意义），取基准 ref——种值与 stats 同一次加载、先于它触发的重渲染 */
   const statLine = useMemo(() => {
+    const lastModel = readOnly ? lastModelRef.current : null;
     if (stats && stats.messageCount > 0) {
       const inTok = stats.inputTokens + (turnLive?.inputTokens ?? 0);
       const outTok = stats.outputTokens + (turnLive?.outputTokens ?? 0);
@@ -2616,8 +2685,9 @@ export default function ChatView({
         // 消息数跟 stats 走而不是 total：轮末重读（scheduleStatsRefresh）只更新 stats，
         // total 是分页窗口的状态（加载更早/更晚的判据），让它中途变大会把「加载更晚」
         // 按钮亮出来、把实时区已在渲染的消息再当历史载一遍（双渲染）
-        count: `${stats.messageCount} 条消息`,
-        detail: `总计 ${fmtTokens(inTok + outTok + cacheR + cacheW)} · 输入 ${fmtTokens(inTok)} · 输出 ${fmtTokens(outTok)}${cacheStatSuffix(inTok, cacheR, cacheW)}`,
+        count: `${stats.messageCount}条消息`,
+        detail: `共${fmtTokensCompact(inTok + outTok + cacheR + cacheW)} 输入${fmtTokensCompact(inTok)} 输出${fmtTokensCompact(outTok)}${cacheStatSuffix(inTok, cacheR, cacheW)}`,
+        model: lastModel,
       };
     }
     if (
@@ -2626,21 +2696,22 @@ export default function ChatView({
       liveTotal.inputTokens + liveTotal.outputTokens > 0
     ) {
       return {
-        count: `${liveMsgs} 条消息`,
-        detail: `总计 ${fmtTokens(
+        count: `${liveMsgs}条消息`,
+        detail: `共${fmtTokensCompact(
           liveTotal.inputTokens +
             liveTotal.outputTokens +
             liveTotal.cacheReadInputTokens +
             liveTotal.cacheCreationInputTokens,
-        )} · 输入 ${fmtTokens(liveTotal.inputTokens)} · 输出 ${fmtTokens(liveTotal.outputTokens)}${cacheStatSuffix(
+        )} 输入${fmtTokensCompact(liveTotal.inputTokens)} 输出${fmtTokensCompact(liveTotal.outputTokens)}${cacheStatSuffix(
           liveTotal.inputTokens,
           liveTotal.cacheReadInputTokens,
           liveTotal.cacheCreationInputTokens,
         )}`,
+        model: lastModel,
       };
     }
     return null;
-  }, [stats, liveMsgs, liveTotal, turnLive]);
+  }, [stats, liveMsgs, liveTotal, turnLive, readOnly]);
 
   /**
    * 统一渲染：活动组跨消息合并——连续的思考/工具/孤儿结果条目折进同一个
@@ -2810,6 +2881,17 @@ export default function ChatView({
             />
           </div>,
         );
+      } else if (e.t === "modelSwitch") {
+        // 切换提示是分界线：活动组必须在它这里收口，否则会折进前一组或被静默吞掉
+        flush();
+        nodes.push(
+          <div key={e.key} className="chat-model-switch" title={`${e.from} → ${e.to}`}>
+            <span className="chat-model-switch-label">
+              <ArrowLeftRightIcon size={12} />
+              模型已切换 {shortModel(e.from)} → {shortModel(e.to)}
+            </span>
+          </div>,
+        );
       } else {
         buf.push(e);
       }
@@ -2838,8 +2920,14 @@ export default function ChatView({
           {statLine && (
             <div className="viewer-stats">
               {statLine.count}
-              {statLine.count && statLine.detail ? " · " : ""}
+              {statLine.count && statLine.detail ? " " : ""}
               {statLine.detail}
+              {statLine.model && (
+                <span className="viewer-stats-model" title={`上次模型 ${statLine.model}`}>
+                  {" "}
+                  {shortModel(statLine.model)}
+                </span>
+              )}
             </div>
           )}
         </div>

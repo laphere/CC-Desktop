@@ -1067,14 +1067,20 @@ code {
   font-size: 11.5px;
   color: var(--accent-hover);
   margin-top: 1px;
-  /* 统计段现在是 6 项（…输出 · 缓存读取 · 缓存命中率）：原来 nowrap + ellipsis 在
-     中等窗口里就已经吃掉尾部，新加的「缓存命中率」正好是最先消失的那一段（窄窗口
-     下等于没实现）。改成「放得下就单行、放不下就折行」，一行放不下时数字一个不丢。
-     ⚠️ 必须配 `word-break: keep-all`：默认 CJK 可在任意字符间断行，会把
-     「缓存命中率」劈成「缓存命 / 中率」；keep-all 让折行点只落在空格上 */
+  /* 统计内容是空格分隔的紧凑分段（N条消息 / 共X / 输入X / 输出X / 缓存X / 命中率 /
+     模型名）：原来 nowrap + ellipsis 在中等窗口里就已经吃掉尾部（最先消失的恰是
+     最后一段）。改成「放得下就单行、放不下就折行」，一行放不下时数字一个不丢。
+     ⚠️ 必须配 `word-break: keep-all`：默认 CJK 可在任意字符间断行，会把「条消息」
+     劈成「条消 / 息」；keep-all 让折行点只落在空格上，每段成为不可断整体 */
   white-space: normal;
   word-break: keep-all;
   line-height: 1.5;
+}
+
+/* 统计行尾部的「上次模型」段（只读会话页专属）：会话归账信息，灰弱化，
+   不与 token 数字抢视觉权重；hover 出完整模型名 */
+.viewer-stats-model {
+  color: var(--muted);
 }
 
 .viewer-main {
@@ -3496,6 +3502,31 @@ html.ctrl-links .md-body a {
 
 .chat-msg {
   max-width: 86%;
+}
+
+/* 「模型已切换」分隔提示（实时区专属条目，不落 jsonl）：左右细线夹住中间标签，
+   横贯内容区。流内条目不另吃上下边距——.chat-body 的 gap 已给出条目间距 */
+.chat-model-switch {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+}
+
+.chat-model-switch::before,
+.chat-model-switch::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.chat-model-switch-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 /* 内容列宽度（2026-09-22）：助手正文取 --read-width（.chat-body 的百分比、居中），

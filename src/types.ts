@@ -360,7 +360,7 @@ export type ChatEvent =
       type: "turn_end";
       isError: boolean;
       resultText?: string | null;
-      /** 本轮（非累计）用量，只做头部「总计」的轮末结算。⚠️ 它是**本轮全部 API 调用
+      /** 本轮（非累计）用量，只做头部统计行的轮末结算。⚠️ 它是**本轮全部 API 调用
        *  的 input 三项之和**（一轮里多次往返就多次累加），不是「当前上下文里有多少」
        *  ——多调用工具轮会远超窗口，别拿它折算占用率（2026-11-07 用户实测 18% 一轮
        *  结束写满 100%）。上下文占用走 context_usage 事件 */
@@ -401,7 +401,15 @@ export type ChatItem =
       /** 配对到的执行结果文本（无主结果仍单独成条 tool_result） */
       resultText?: string;
     }
-  | { id: number; kind: "tool_result"; toolUseId: string; isError: boolean; text: string };
+  | { id: number; kind: "tool_result"; toolUseId: string; isError: boolean; text: string }
+  | {
+      id: number;
+      kind: "model_switch";
+      /** 切换前的模型名（完整串；展示时经 shortModel 简化） */
+      from: string;
+      /** 切换后实际生效的模型名（完整串；来自 session_ready 的 init 帧真值） */
+      to: string;
+    };
 
 /** 对话中的权限确认请求 */
 export interface ChatPermissionRequest {

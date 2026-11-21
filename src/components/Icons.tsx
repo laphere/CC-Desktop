@@ -1052,3 +1052,15 @@ export function LockIcon({ size = 13, className }: IconProps) {
     </svg>
   );
 }
+
+/** 左右双向箭头（会话页「模型已切换」分隔提示） */
+export function ArrowLeftRightIcon({ size = 13, className }: IconProps) {
+  return (
+    <svg className={className} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M8 3 4 7l4 4" />
+      <path d="M4 7h16" />
+      <path d="m16 21 4-4-4-4" />
+      <path d="M20 17H4" />
+    </svg>
+  );
+}

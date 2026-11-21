@@ -313,7 +313,7 @@ options.sandbox = { enabled: true, network: { allowLocalBinding: true }, filesys
 
 ### 6.11 上下文占用（**实**，2026-09-22 复验）
 
-`getContextUsage(opts?)` 拿到的是**当前上下文窗口占用**，和会话页头部的「N 条消息 · 总计 token」是两件事：后者是 token 累计，前者是「还剩多少额度」。
+`getContextUsage(opts?)` 拿到的是**当前上下文窗口占用**，和会话页头部的 token 统计行（累计口径）是两件事：后者是 token 累计，前者是「还剩多少额度」。
 
 ```ts
 getContextUsage({ detail: 'summary' })

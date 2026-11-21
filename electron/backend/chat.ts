@@ -205,7 +205,7 @@ export type ChatEvent =
       isError: boolean;
       resultText?: string | null;
       /** 本轮（非累计）用量——⚠️ 它是**本轮全部 API 调用的 input 三项之和**（头部
-       *  「总计」的口径），不是「当前上下文里有多少」，别拿它折算占用率
+       *  统计行的 token 口径），不是「当前上下文里有多少」，别拿它折算占用率
        *  （2026-11-07 用户实测：多调用工具轮把它当上下文，18% 直接写满 100%）。
        *  上下文占用走 context_usage 事件 */
       usage?: ChatUsage | null;
@@ -1376,7 +1376,7 @@ class ChatSession {
         // 负责 —— init 要等第一条消息才到，光靠这里会漏掉"一启动就显示"；轮进行中的
         // 持续刷新由 startCtxDiskPoll 读 jsonl 尾部负责，见 CTX_DISK_POLL_INTERVAL_MS）。
         // ⚠️ 别用 result 帧的 usage 折算占用率：它是**本轮全部 API 调用的 input 三项
-        // 之和**（头部「总计」的口径），多调用工具轮会远超窗口——2026-11-07 用户实测，
+        // 之和**（头部统计行的 token 口径），多调用工具轮会远超窗口——2026-11-07 用户实测，
         // 旧代码拿它当「当前上下文」，18% 一轮结束直接写满 100%。
         // 放在这里而不是 translator 里：那层是纯翻译，而 getContextUsage 要 this.query。
         if (events.some((e) => e.type === "turn_end")) {

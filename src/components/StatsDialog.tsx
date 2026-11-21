@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../lib/api";
+import { shortModel } from "../lib/token-stats";
 import type { UsageStats } from "../types";
 import Modal from "./Modal";
 
@@ -69,11 +70,6 @@ function fmtTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return String(n);
-}
-
-/** 模型名简化：去掉 -20250514 日期后缀（hover 看全名） */
-function shortModel(m: string): string {
-  return m.replace(/-20\d{6,8}.*$/, "");
 }
 
 /** 本地日期 YYYY-MM-DD（后端 perDay 按前端传的时区偏移归属，与本函数同钟同区） */

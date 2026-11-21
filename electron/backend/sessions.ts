@@ -715,7 +715,7 @@ export function getSessionMessages(
  *  口径必须与头部历史加载同源，别改用 usage-stats.ts 的 scanFileUsage：那边只收
  *  assistant、跳过 <synthetic>、不排除 sidechain/isMeta，messages 也不是「消息条数」，
  *  换了就改数）。轮末刷新头部统计用：stats 是历史加载时的**快照**，LLM 回完内容不会
- *  自己变——不重读的话头部「N 条消息 · 总计…」要等关掉重开才更新；不动渲染数据源
+ *  自己变——不重读的话头部统计行要等关掉重开才更新；不动渲染数据源
  *  （历史区/实时区都不碰），不会引发双渲染 */
 export function sessionStats(file: string, projectsDir: string): SessionUsageStats {
   const { path: p } = validateSessionFile(file, projectsDir);

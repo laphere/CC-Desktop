@@ -43,8 +43,36 @@ export function cacheHitRate(u: PromptTokenParts): number | null {
   return rate < 0 ? 0 : rate > 1 ? 1 : rate;
 }
 
-/** 命中率百分比文本：「92.1%」。固定一位小数——统计行里数字挨在一起，
- *  位数跳动会让整行左右抖（fmtTokens 的单位也同理固定） */
+/** 命中率百分比文本：「92.1%」，固定一位小数。统计行实际用的是下面的
+ *  fmtHitRateCompact（剥掉整数的 .0），本函数是它的底座；固定小数位的初衷是
+ *  统计行里数字挨在一起，位数跳动会让整行左右抖（fmtTokens 的单位也同理固定） */
 export function fmtHitRate(rate: number): string {
   return `${(rate * 100).toFixed(1)}%`;
+}
+
+/** 模型名简化：去掉 -20250514 日期后缀（hover 可看全名）。日期后缀对人是噪声，
+ *  但判等、落库等场景要用原串——本函数只用于**展示** */
+export function shortModel(m: string): string {
+  return m.replace(/-20\d{6,8}.*$/, "");
+}
+
+/** 末位恰为「.0」时剥掉（"211.0" → "211"，"21.9" 原样） */
+function trimTenthZero(s: string): string {
+  return s.endsWith(".0") ? s.slice(0, -2) : s;
+}
+
+/** 紧凑 token 文本（头部统计行专用）：与 MessageParts 的 fmtTokens 同一缩写刻度
+ *  （1234 → 1.2K），但整千/整百万补出的「.0」不显示（211.0K → 211K）。
+ *  不复用 fmtTokens 本体：它被思考估算、「本次」徽标、tooltip 等多处共用，
+ *  恒一位小数是那边的行为，在这里改会把「.0」涟漪出去 */
+export function fmtTokensCompact(n: number): string {
+  if (!Number.isFinite(n) || n <= 0) return "0";
+  if (n >= 1_000_000) return `${trimTenthZero((n / 1_000_000).toFixed(1))}M`;
+  if (n >= 1_000) return `${trimTenthZero((n / 1_000).toFixed(1))}K`;
+  return String(Math.round(n));
+}
+
+/** 命中率百分比文本的紧凑变体：99.0% → 99%，非零小数保留（92.1% 原样） */
+export function fmtHitRateCompact(rate: number): string {
+  return fmtHitRate(rate).replace(/\.0%$/, "%");
 }
