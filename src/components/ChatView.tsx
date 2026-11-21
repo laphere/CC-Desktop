@@ -191,10 +191,10 @@ function addUsage(a: ChatUsage, b: ChatUsage): ChatUsage {
   };
 }
 
-/** 头部统计行尾部的缓存段：「 缓存10.5M 92.1%」（自带前导空格，与前面各段以空格
- *  相接；命中率为 null 时只有缓存量）。两个字段同一个闸门（cacheR > 0）——没读过
- *  缓存时既不该有「缓存0」，也不该有「99%」（首次冷启动轮的正常形态，不是异常要
- *  报出来）。裸百分比紧跟缓存量 = 命中率；分子分母必须取**同一口径**的三桶
+/** 头部统计行尾部的缓存段：「 · 缓存10.5M · 92.1%」（自带前导分隔符，与前面各段
+ *  以「·」相接；命中率为 null 时只有缓存量段）。两个字段同一个闸门（cacheR > 0）
+ *  ——没读过缓存时既不该有「缓存0」，也不该有「99%」（首次冷启动轮的正常形态，
+ *  不是异常要报出来）。裸百分比段 = 命中率；分子分母必须取**同一口径**的三桶
  *  （输入 / 读缓存 / 写缓存），见 lib/token-stats.ts 的注释 */
 function cacheStatSuffix(inTok: number, cacheR: number, cacheW: number): string {
   if (!(cacheR > 0)) return "";
@@ -203,7 +203,7 @@ function cacheStatSuffix(inTok: number, cacheR: number, cacheW: number): string 
     cacheReadInputTokens: cacheR,
     cacheCreationInputTokens: cacheW,
   });
-  return ` 缓存${fmtTokensCompact(cacheR)}${rate == null ? "" : ` ${fmtHitRateCompact(rate)}`}`;
+  return ` · 缓存${fmtTokensCompact(cacheR)}${rate == null ? "" : ` · ${fmtHitRateCompact(rate)}`}`;
 }
 
 /** 取消息数组里最后一条带模型名的 assistant 消息的模型名（找不到返回 null）。
@@ -2671,9 +2671,10 @@ export default function ChatView({
    *  sitting 已落盘的消息吃进去，再叠 usage 就双计——只叠本轮尚未落盘的 turnLive）；
    *  兜底分支叠完整 liveTotal。⚠️ 轮末那 ~400ms（turnLive 已清、stats 未回）历史分支
    *  会先跌回旧快照再涨上来——落后一拍，量级看不出，但不是严格的「无缝」。
-   *  格式为紧凑分段（「388条消息 共21.9M 输入211K 输出62K 缓存21.6M 99%」，段间空格，
-   *  见 .viewer-stats 的注释）；model 段只在只读页显示（对话态模型在底栏选择器上，
-   *  重复一份没意义），取基准 ref——种值与 stats 同一次加载、先于它触发的重渲染 */
+   *  格式为紧凑分段（「388条消息 · 共21.9M · 输入211K · 输出62K · 缓存21.6M · 99%」，
+   *  段间「·」、段内标签贴数值，见 .viewer-stats 的注释）；model 段只在只读页显示
+   *  （对话态模型在底栏选择器上，重复一份没意义），取基准 ref——种值与 stats 同一次
+   *  加载、先于它触发的重渲染 */
   const statLine = useMemo(() => {
     const lastModel = readOnly ? lastModelRef.current : null;
     if (stats && stats.messageCount > 0) {
@@ -2686,7 +2687,7 @@ export default function ChatView({
         // total 是分页窗口的状态（加载更早/更晚的判据），让它中途变大会把「加载更晚」
         // 按钮亮出来、把实时区已在渲染的消息再当历史载一遍（双渲染）
         count: `${stats.messageCount}条消息`,
-        detail: `共${fmtTokensCompact(inTok + outTok + cacheR + cacheW)} 输入${fmtTokensCompact(inTok)} 输出${fmtTokensCompact(outTok)}${cacheStatSuffix(inTok, cacheR, cacheW)}`,
+        detail: `共${fmtTokensCompact(inTok + outTok + cacheR + cacheW)} · 输入${fmtTokensCompact(inTok)} · 输出${fmtTokensCompact(outTok)}${cacheStatSuffix(inTok, cacheR, cacheW)}`,
         model: lastModel,
       };
     }
@@ -2702,7 +2703,7 @@ export default function ChatView({
             liveTotal.outputTokens +
             liveTotal.cacheReadInputTokens +
             liveTotal.cacheCreationInputTokens,
-        )} 输入${fmtTokensCompact(liveTotal.inputTokens)} 输出${fmtTokensCompact(liveTotal.outputTokens)}${cacheStatSuffix(
+        )} · 输入${fmtTokensCompact(liveTotal.inputTokens)} · 输出${fmtTokensCompact(liveTotal.outputTokens)}${cacheStatSuffix(
           liveTotal.inputTokens,
           liveTotal.cacheReadInputTokens,
           liveTotal.cacheCreationInputTokens,
@@ -2920,11 +2921,11 @@ export default function ChatView({
           {statLine && (
             <div className="viewer-stats">
               {statLine.count}
-              {statLine.count && statLine.detail ? " " : ""}
+              {statLine.count && statLine.detail ? " · " : ""}
               {statLine.detail}
+              {statLine.model && " · "}
               {statLine.model && (
                 <span className="viewer-stats-model" title={`上次模型 ${statLine.model}`}>
-                  {" "}
                   {shortModel(statLine.model)}
                 </span>
               )}
