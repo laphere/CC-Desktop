@@ -3506,7 +3506,20 @@ html.ctrl-links .md-body a {
 }
 
 /* 「模型已切换」分隔提示（实时区专属条目，不落 jsonl）：左右细线夹住中间标签，
-   横贯内容区。流内条目不另吃上下边距——.chat-body 的 gap 已给出条目间距 */
+   宽度与助手正文列对齐（--read-width 居中 + 进度轨右移补偿，同下方 chat-msg 组
+   的算法，两种容器形态都要跟）。流内条目不另吃上下边距——.chat-body 的 gap
+   已给出条目间距 */
+.chat-body > .chat-model-switch {
+  max-width: var(--read-width);
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.chat-main:has(> .msg-rail) .chat-body > .chat-model-switch {
+  margin-left: calc((100% - var(--read-width)) / 2 - var(--rail-w) / 2);
+  margin-right: calc((100% - var(--read-width)) / 2 + var(--rail-w) / 2);
+}
+
 .chat-model-switch {
   display: flex;
   align-items: center;
