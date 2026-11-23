@@ -739,24 +739,64 @@ code {
   color: var(--accent);
 }
 
-/* 置顶图钉：行首常显（是状态标识，藏起来就看不出这行能置顶），hover 提亮 */
-.session-pin {
+/* 会话行尾操作组（归档删除 + 置顶）：默认隐藏，行 hover 才现形——行内只留标题/元数据，
+   操作入口不挤占标题宽度。visibility 随 opacity 一起切：隐藏时按钮不可点也不占位 */
+.session-actions {
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity var(--dur-fast);
+}
+
+.session-row:hover .session-actions {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* 操作钮：图标态与确认态同高；line-height:0 + grid 居中消除字形基线偏移 */
+.session-act {
+  flex-shrink: 0;
+  min-width: 24px;
+  height: 22px;
+  padding: 0 5px;
   display: grid;
   place-items: center;
   line-height: 0;
   border: none;
   background: none;
   color: var(--dim);
+  font-size: 11px;
+  font-weight: 600;
   cursor: pointer;
-  padding: 3px 4px;
   border-radius: 5px;
   transition: color var(--dur-fast), background var(--dur-fast);
 }
 
-.session-pin:hover {
+.session-act:hover {
   color: var(--accent);
   background: var(--accent-soft);
+}
+
+/* 已置顶的图钉点亮（与未置顶区分，即使在 hover 态下一眼可辨） */
+.session-act.session-pin.on {
+  color: var(--accent);
+}
+
+/* 归档的确认态：红底白字「确认」，等宽于图标态避免 hover 时按钮跳变；
+   再点一次才执行（语义同回收站行内二次确认，4s 无人点自动收回） */
+.session-del.confirming {
+  min-width: 36px;
+  background: var(--danger);
+  color: #fff;
+}
+
+.session-del.confirming:hover {
+  background: var(--danger);
+  color: #fff;
+  opacity: 0.88;
 }
 
 /* 置顶区里的所属项目名徽标（跨项目聚合，标题会重名，必须消歧） */

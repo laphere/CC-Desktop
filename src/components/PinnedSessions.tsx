@@ -13,6 +13,8 @@ interface Props {
   onOpenSession: (projectPath: string, session: SessionInfo) => void;
   /** 取消置顶（置顶条目只存 jsonl 路径 + 项目路径，故传 file 而非整份元数据） */
   onTogglePin: (projectPath: string, file: string) => void;
+  /** 删除会话（移入回收站）：行尾归档按钮确认后触发 */
+  onDeleteSession: (projectPath: string, session: SessionInfo) => void;
   /** 会话行右键菜单（终端继续/重命名/取消置顶/删除收进菜单，行上不放按钮挤占标题宽度） */
   onSessionContextMenu: (x: number, y: number, projectPath: string, session: SessionInfo) => void;
 }
@@ -26,6 +28,7 @@ export default function PinnedSessions({
   projects,
   onOpenSession,
   onTogglePin,
+  onDeleteSession,
   onSessionContextMenu,
 }: Props) {
   if (items.length === 0) return null;
@@ -45,6 +48,7 @@ export default function PinnedSessions({
             projectName={projectNameOf(projects, s.projectPath)}
             onOpen={() => onOpenSession(s.projectPath, s)}
             onTogglePin={() => onTogglePin(s.projectPath, s.file)}
+            onDelete={() => onDeleteSession(s.projectPath, s)}
             onContextMenu={(x, y) => onSessionContextMenu(x, y, s.projectPath, s)}
           />
         ))}

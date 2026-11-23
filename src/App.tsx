@@ -1858,6 +1858,7 @@ export default function App() {
                 projects={items}
                 onOpenSession={continueSessionTab}
                 onTogglePin={togglePin}
+                onDeleteSession={deleteSession}
                 onSessionContextMenu={(x, y, key, session) =>
                   setSessionMenu({ x, y, key, session })
                 }
@@ -1874,6 +1875,7 @@ export default function App() {
                 pinnedFiles={pinnedFiles}
                 onOpenSession={continueSessionTab}
                 onTogglePin={togglePin}
+                onDeleteSession={deleteSession}
                 onSessionContextMenu={(x, y, key, session) =>
                   setSessionMenu({ x, y, key, session })
                 }
@@ -1890,6 +1892,7 @@ export default function App() {
             onReorder={reorder}
             dragEnabled={search.trim() === ""}
             onTogglePin={togglePin}
+            onDeleteSession={deleteSession}
             onToggleExpand={toggleExpand}
             onSessionContextMenu={(x, y, key, session) =>
               setSessionMenu({ x, y, key, session })

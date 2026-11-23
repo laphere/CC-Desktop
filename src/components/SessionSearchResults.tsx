@@ -22,6 +22,8 @@ interface Props {
   pinnedFiles: Set<string>;
   onOpenSession: (projectPath: string, session: SessionInfo) => void;
   onTogglePin: (projectPath: string, file: string) => void;
+  /** 删除会话（移入回收站）：行尾归档按钮确认后触发 */
+  onDeleteSession: (projectPath: string, session: SessionInfo) => void;
   onSessionContextMenu: (x: number, y: number, projectPath: string, session: SessionInfo) => void;
 }
 
@@ -40,6 +42,7 @@ export default function SessionSearchResults({
   pinnedFiles,
   onOpenSession,
   onTogglePin,
+  onDeleteSession,
   onSessionContextMenu,
 }: Props) {
   // 空结果也要渲染（done + 0 条 = 「没有匹配的会话」）：否则用户分不清「还没搜完」
@@ -73,6 +76,7 @@ export default function SessionSearchResults({
             highlight={keyword}
             onOpen={() => onOpenSession(s.projectPath, s)}
             onTogglePin={() => onTogglePin(s.projectPath, s.file)}
+            onDelete={() => onDeleteSession(s.projectPath, s)}
             onContextMenu={(x, y) => onSessionContextMenu(x, y, s.projectPath, s)}
           />
         ))}

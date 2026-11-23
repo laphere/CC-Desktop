@@ -1,6 +1,6 @@
 import type { SessionInfo } from "../types";
 import { highlightKeyword } from "../lib/keyword-highlight";
-import { PinIcon } from "./Icons";
+import SessionRowActions from "./SessionRowActions";
 
 interface Props {
   session: SessionInfo;
@@ -14,6 +14,8 @@ interface Props {
   highlight?: string;
   onOpen: () => void;
   onTogglePin: () => void;
+  /** 删除会话（移入回收站，可恢复）：行尾归档按钮确认后触发 */
+  onDelete: () => void;
   /** 会话行右键菜单（终端继续/重命名/置顶/删除收进菜单，行上不放按钮挤占标题宽度） */
   onContextMenu: (x: number, y: number) => void;
 }
@@ -39,6 +41,7 @@ export default function SessionRow({
   highlight,
   onOpen,
   onTogglePin,
+  onDelete,
   onContextMenu,
 }: Props) {
   return (
@@ -54,16 +57,6 @@ export default function SessionRow({
         .filter(Boolean)
         .join("\n")}
     >
-      <button
-        className="session-pin"
-        title={pinned ? "取消置顶" : "置顶（在顶部聚合区常驻显示）"}
-        onClick={(e) => {
-          e.stopPropagation();
-          onTogglePin();
-        }}
-      >
-        <PinIcon />
-      </button>
       <div className="session-body">
         <div className="session-title">
           {projectName && <span className="session-project">{projectName}</span>}
@@ -74,6 +67,7 @@ export default function SessionRow({
           {session.summary && ` · ${session.summary}`}
         </div>
       </div>
+      <SessionRowActions pinned={pinned} onTogglePin={onTogglePin} onDelete={onDelete} />
     </div>
   );
 }

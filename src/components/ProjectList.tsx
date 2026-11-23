@@ -1,8 +1,10 @@
 import { useCallback, useRef, useState } from "react";
 import type { DragEvent } from "react";
 import type { Project, SessionInfo } from "../types";
-import { FolderIcon, MoreIcon, PinIcon, PlusIcon } from "./Icons";
+import { FolderIcon, MoreIcon, PlusIcon } from "./Icons";
 import { useFlip } from "../lib/flip";
+import SessionRowActions from "./SessionRowActions";
+import { formatTime } from "./SessionRow";
 
 interface Props {
   items: Project[];
@@ -20,6 +22,8 @@ interface Props {
   onReorder: (draggedKey: string, targetKey: string, before: boolean) => void;
   /** 置顶 / 取消置顶（置顶条目只存 jsonl 路径 + 项目路径，故传 file 而非整份元数据） */
   onTogglePin: (key: string, file: string) => void;
+  /** 删除会话（移入回收站）：行尾归档按钮确认后触发（与右键菜单同一去向） */
+  onDeleteSession: (key: string, session: SessionInfo) => void;
   /** 是否启用拖拽排序（搜索过滤期间禁用） */
   dragEnabled: boolean;
   onToggleExpand: (key: string) => void;
@@ -32,18 +36,6 @@ interface Props {
   onContextMenu: (x: number, y: number, key: string) => void;
 }
 
-/** 相对时间：刚刚 / x 分钟前 / x 小时前 / 昨天 / MM-DD HH:mm */
-function formatTime(ms: number): string {
-  const diff = Date.now() - ms;
-  if (diff < 60_000) return "刚刚";
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`;
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`;
-  if (diff < 172_800_000) return "昨天";
-  const d = new Date(ms);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
 export default function ProjectList({
   items,
   pinnedFiles,
@@ -54,6 +46,7 @@ export default function ProjectList({
   onSelect,
   onReorder,
   onTogglePin,
+  onDeleteSession,
   dragEnabled,
   onToggleExpand,
   onSessionContextMenu,
@@ -236,16 +229,6 @@ export default function ProjectList({
                         .filter(Boolean)
                         .join("\n")}
                     >
-                      <button
-                        className="session-pin"
-                        title="置顶（在顶部聚合区常驻显示）"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onTogglePin(l.key, s.file);
-                        }}
-                      >
-                        <PinIcon />
-                      </button>
                       <div className="session-body">
                         <div className="session-title">{s.title}</div>
                         <div className="session-meta">
@@ -253,6 +236,12 @@ export default function ProjectList({
                           {s.summary && ` · ${s.summary}`}
                         </div>
                       </div>
+                      {/* 可见会话都已滤掉置顶项，故 pinned 恒 false：图钉语义即「置顶」 */}
+                      <SessionRowActions
+                        pinned={false}
+                        onTogglePin={() => onTogglePin(l.key, s.file)}
+                        onDelete={() => onDeleteSession(l.key, s)}
+                      />
                     </div>
                   ))
                 )}
