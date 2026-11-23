@@ -721,6 +721,7 @@ code {
   border-radius: 7px;
   border: 1px solid transparent;
   cursor: default;
+  position: relative; /* 行尾操作组（.session-actions）绝对定位的基准 */
   transition: background var(--dur-fast), border-color var(--dur-fast);
 }
 
@@ -739,10 +740,14 @@ code {
   color: var(--accent);
 }
 
-/* 会话行尾操作组（归档删除 + 置顶）：默认隐藏，行 hover 才现形——行内只留标题/元数据，
-   操作入口不挤占标题宽度。visibility 随 opacity 一起切：隐藏时按钮不可点也不占位 */
+/* 会话行尾操作组（归档删除 + 置顶）：**绝对定位浮在行右端，常态不占布局**——
+   若用 visibility:hidden 留在 flex 流里，每行右侧会一直空出按钮宽的一条（列表竖向
+   看就是空列）。hover 时 body 让出等宽 padding（见下），按钮浮现不遮 meta */
 .session-actions {
-  flex-shrink: 0;
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
   display: flex;
   align-items: center;
   gap: 2px;
@@ -811,9 +816,16 @@ code {
   border-radius: 4px;
 }
 
+/* hover 时正文右缩，给行尾操作组腾位（62px = 两枚按钮 50px + 余量；确认态按钮更宽也够）。
+   padding 参与过渡：浮现瞬间标题/元数据平滑让位而非跳动 */
 .session-body {
   flex: 1;
   min-width: 0;
+  transition: padding var(--dur-fast);
+}
+
+.session-row:hover .session-body {
+  padding-right: 62px;
 }
 
 .session-title {
