@@ -237,6 +237,12 @@ export interface StartChatOptions {
   /** 初始权限模式；不传（undefined）时**不给 CLI 传 `permissionMode`**，由 CLI 自己按 settings
    *  的 `permissions.defaultMode` 定（CLI 的 flag 压过 settings，所以这里不能兜一个默认值） */
   initialMode?: ChatPermissionMode;
+  /** 会话级供应商 env：经 SDK 的 flag 层（`Options.settings.env`）注入，压过 settings.json
+   *  的 env（实测：进程 env 会被 settings.json 盖掉，flag 层才压得住）。null = 跟随全局。
+   *  凭证双键口径见 session-provider.ts 的 buildProviderEnv。 */
+  providerEnv?: Record<string, string> | null;
+  /** 会话级模型（等价 `--model`，flag 优先于 env）；null = 跟随供应商/默认 */
+  model?: string | null;
 }
 
 // ---------------- 常量 ----------------
@@ -1125,6 +1131,9 @@ class ChatSession {
    *  「先显示又消失」闪一条。 */
   private titlePending = false;
   private explicitMode: ChatPermissionMode | null;
+  /** 会话级供应商 env（flag 层注入）与模型；两者都在 spawn 前定死，进程起来后不可改 */
+  private providerEnv: Record<string, string> | null;
+  private model: string | null;
   private emit: (e: ChatEvent) => void;
 
   private queue = new MessageQueue();
@@ -1190,6 +1199,8 @@ class ChatSession {
     this.projectPath = opts.projectPath;
     this.resumeId = opts.resumeId;
     this.explicitMode = opts.initialMode ?? null;
+    this.providerEnv = opts.providerEnv ?? null;
+    this.model = opts.model ?? null;
     this.emit = emit;
   }
 
@@ -1249,6 +1260,16 @@ class ChatSession {
     // 传了就会压过 settings——CLI 的 flag 优先于配置文件。
     if (this.explicitMode) {
       options.permissionMode = toSdkPermissionMode(this.explicitMode);
+    }
+
+    // 会话级供应商：经 SDK flag 层注入（Options.settings.env）——实测只有 flag 层压得过
+    // settings.json 的 env，进程 env 会被它盖掉。凭证双键口径见 buildProviderEnv。
+    if (this.providerEnv) {
+      options.settings = { env: this.providerEnv };
+    }
+    // 会话级模型：等价 --model，flag 优先于 env。
+    if (this.model) {
+      options.model = this.model;
     }
 
     if (this.resumeId) {

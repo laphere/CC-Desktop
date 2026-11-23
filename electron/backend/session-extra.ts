@@ -556,7 +556,11 @@ export function exportSession(
  * 与 Rust 不同，这里不做 canonicalize（Rust 也是词法 parent 判断）——mangle 已把
  * `:` `\` `/` `_` `.` 全替换为 `-`，`..` 也会变成 `--`，结构上不可能逃出 projectsDir。
  */
-function purgeOneProjectData(projectsDir: string, projectPath: string): boolean {
+function purgeOneProjectData(
+  projectsDir: string,
+  projectPath: string,
+  onBeforeDelete?: (projectPath: string) => void,
+): boolean {
   const mangled = mangleProjectPath(projectPath.trim());
   if (mangled === "") return false; // 空串无法定位，直接放弃
   const target = path.join(projectsDir, mangled);
@@ -567,6 +571,8 @@ function purgeOneProjectData(projectsDir: string, projectPath: string): boolean 
   if (fs.existsSync(real) && fs.statSync(real).isDirectory()) return false;
   // 防线 3：目标目录必须精确存在才删（精确同名，不是前缀/模糊）
   if (!fs.existsSync(target) || !fs.statSync(target).isDirectory()) return false;
+  // 删除前回调：调用方要趁文件还在收 sessionId（用于清理会话级供应商记录等）
+  onBeforeDelete?.(projectPath);
   fs.rmSync(target, { recursive: true, force: true });
   return true;
 }
@@ -579,11 +585,12 @@ function purgeOneProjectData(projectsDir: string, projectPath: string): boolean 
 export function purgeClaudeProjectData(
   paths: string[],
   projectsDir: string = claudeProjectsDir(),
+  onBeforeDelete?: (projectPath: string) => void,
 ): number {
   const dir = path.resolve(projectsDir);
   let removed = 0;
   for (const projectPath of paths) {
-    if (purgeOneProjectData(dir, projectPath)) removed++;
+    if (purgeOneProjectData(dir, projectPath, onBeforeDelete)) removed++;
   }
   return removed;
 }

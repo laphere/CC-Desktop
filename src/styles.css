@@ -4851,6 +4851,118 @@ html.ctrl-links .md-body a {
   text-overflow: ellipsis;
 }
 
+/* ============ 会话级「供应商 + 模型」下拉（ProviderModelPicker） ============ */
+/* 复用 .mode-picker/.mode-panel 那套；面板要装「分组 + 模型名」，比模型选择器宽 */
+.provider-model-picker {
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+.provider-model-picker .chat-mode {
+  min-width: 0;
+  max-width: 190px;
+}
+
+.provider-model-panel {
+  width: min(320px, calc(100vw - 40px));
+  max-width: min(320px, calc(100vw - 40px));
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.pmp-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 4px 6px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--panel-2);
+  color: var(--dim);
+}
+
+.pmp-search input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: none;
+  color: var(--text);
+  font-size: 12.5px;
+  outline: none;
+}
+
+.provider-model-panel .mode-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 勾选标记只在选中行显形（未选中行仍留位，避免各行文字左右跳动） */
+.pmp-check {
+  flex-shrink: 0;
+  opacity: 0;
+  color: var(--accent-hover);
+}
+
+.mode-item.active .pmp-check {
+  opacity: 1;
+}
+
+.pmp-main {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.pmp-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pmp-sub {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--dim);
+}
+
+.pmp-slot {
+  flex-shrink: 0;
+  /* 与 .model-slot 同宽，两套面板并排看时槽位对齐 */
+  min-width: 52px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--dim);
+}
+
+.mode-item.active .pmp-slot {
+  color: var(--accent-hover);
+}
+
+.pmp-model-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.pmp-provider {
+  font-weight: 600;
+}
+
+/* 模型行缩进到槽位列，视觉上从属于上面的供应商行 */
+.pmp-model {
+  padding-left: 28px;
+}
+
+.mode-lock {
+  flex-shrink: 0;
+  opacity: 0.6;
+}
+
 /* ============ `/` 命令补全面板（supportedCommands） ============ */
 /* 挂在 .composer-card 里、向上弹（与 .mode-panel 同一方向语言）；
    .composer-card 的 position:relative 加在文件上方它自己的块里 */

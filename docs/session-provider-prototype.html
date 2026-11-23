@@ -1,0 +1,340 @@
+<title>会话级供应商 / 模型选择 · UI 方案</title>
+<style>
+  /* ============ 外层页面（方案文档本身，双主题自适应宿主） ============ */
+  :root {
+    --page-bg: #f4f2ee;
+    --page-panel: #fbfaf8;
+    --ink: #292524;
+    --ink-muted: #78716c;
+    --ink-dim: #a8a29e;
+    --line: #e2ded4;
+    --accent: #c15f3c;
+    --accent-soft: rgba(193, 95, 60, 0.12);
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --page-bg: #20201d;
+      --page-panel: #262522;
+      --ink: #ece9e2;
+      --ink-muted: #a8a29e;
+      --ink-dim: #6f6a63;
+      --line: #383530;
+      --accent: #d97757;
+      --accent-soft: rgba(217, 119, 87, 0.16);
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --page-bg: #20201d;
+    --page-panel: #262522;
+    --ink: #ece9e2;
+    --ink-muted: #a8a29e;
+    --ink-dim: #6f6a63;
+    --line: #383530;
+    --accent: #d97757;
+    --accent-soft: rgba(217, 119, 87, 0.16);
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  button { font-family: inherit; }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+  body {
+    font-family: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+    font-size: 13px;
+    color: var(--ink);
+    background: var(--page-bg);
+    line-height: 1.6;
+  }
+  .page { max-width: 1080px; margin: 0 auto; padding: 30px 20px 48px; }
+  .page-head h1 { font-size: 20px; font-weight: 600; }
+  .page-lead { color: var(--ink-muted); font-size: 13px; margin: 4px 0 18px; max-width: 78ch; }
+  .page-lead code { background: var(--page-panel); border: 1px solid var(--line); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+
+  .frame-note { font-size: 12px; color: var(--ink-dim); margin-bottom: 8px; }
+  .frame { border: 1px solid var(--line); border-radius: 14px; overflow: hidden; box-shadow: 0 1px 2px rgba(0,0,0,.05), 0 18px 44px rgba(0,0,0,.10); height: 620px; }
+
+  .try-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 14px 0 6px; }
+  .try-label { font-size: 12px; color: var(--ink-muted); }
+  .chip { display: inline-flex; align-items: center; padding: 5px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--page-panel); color: var(--ink-muted); font-size: 12px; cursor: pointer; }
+  .chip:hover { border-color: var(--accent); color: var(--accent); }
+
+  .notes { margin-top: 20px; display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+  .note { background: var(--page-panel); border: 1px solid var(--line); border-radius: 10px; padding: 13px 15px; }
+  .note h3 { font-size: 12.5px; font-weight: 600; margin-bottom: 4px; }
+  .note p { font-size: 12px; color: var(--ink-muted); }
+  .note p code { background: var(--page-bg); border: 1px solid var(--line); padding: 0 4px; border-radius: 3px; font-size: 11px; }
+
+  /* ================================================================
+     app 本体的视觉语言（照搬 styles.css 的 tokens）
+     ================================================================ */
+  #frame {
+    --bg: #f9f8f5; --panel: #ffffff; --panel-2: #f1efe9; --border: #e5e2da;
+    --text: #292524; --muted: #78716c; --dim: #a8a29e;
+    --accent: #c15f3c; --accent-hover: #a84e2e; --accent-soft: rgba(193,95,60,.12);
+    --composer-h: 30px;
+    color-scheme: light;
+  }
+  #frame[data-theme="dark"] {
+    --bg: #1f1e1b; --panel: #292724; --panel-2: #33302b; --border: #3d3a34;
+    --text: #f4f1ea; --muted: #a8a29e; --dim: #6f6a63;
+    --accent: #d97757; --accent-hover: #e08b6d; --accent-soft: rgba(217,119,87,.16);
+    color-scheme: dark;
+  }
+
+  #frame .app { display: flex; flex-direction: column; height: 100%; font-size: 13px; color: var(--text); background: var(--bg); user-select: none; }
+  #frame .app button { cursor: pointer; }
+  #frame .header { display: flex; align-items: center; justify-content: space-between; padding: 8px 14px; background: var(--panel); border-bottom: 1px solid var(--border); }
+  #frame .brand { display: flex; align-items: center; gap: 10px; }
+  #frame .brand h1 { font-size: 14px; font-weight: 600; }
+  #frame .header-tools { display: flex; align-items: center; gap: 6px; }
+  #frame .icon-btn { width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; border-radius: 8px; border: 1px solid var(--border); background: var(--panel); color: var(--text); }
+  #frame .icon-btn:hover { background: var(--panel-2); }
+
+  #frame .main { flex: 1; display: flex; min-height: 0; }
+  #frame .main-left { flex: 0 0 320px; border-right: 1px solid var(--border); background: var(--bg); padding: 12px; }
+  #frame .proj { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 8px; }
+  #frame .proj:hover { background: var(--panel-2); }
+  #frame .proj .name { font-weight: 600; }
+  #frame .proj .plus { margin-left: auto; color: var(--muted); }
+  #frame .viewer { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+
+  /* ---- 会话页主体（简化为空态） ---- */
+  #frame .chat-body { flex: 1; padding: 24px; color: var(--ink-dim); font-size: 13px; }
+
+  /* ---- 输入卡片 ---- */
+  #frame .chat-composer { padding: 10px 14px 14px; }
+  #frame .composer-card { position: relative; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); padding: 12px; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+  #frame .chat-input { width: 100%; height: 54px; resize: none; border: none; background: none; outline: none; color: var(--text); font-size: 13px; font-family: inherit; }
+  #frame .composer-bar { display: flex; align-items: center; gap: 16px; margin-top: 2px; }
+  #frame .composer-bar .chat-mode { height: var(--composer-h); }
+  #frame .composer-meta { margin-left: auto; display: flex; align-items: center; gap: 10px; height: var(--composer-h); font-size: 12.5px; color: var(--muted); }
+
+  #frame .chat-mode { display: inline-flex; align-items: center; gap: 6px; border: 1px solid transparent; background: none; padding: 0 4px; color: var(--text); font-size: 12.5px; border-radius: 7px; }
+  #frame .chat-mode:hover:not(:disabled) { background: var(--panel-2); }
+  #frame .chat-mode:disabled { cursor: default; color: var(--muted); }
+  #frame .mode-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #frame .mode-arrow { display: flex; align-items: center; opacity: .6; }
+  #frame .mode-lock { flex-shrink: 0; opacity: .6; }
+
+  /* ---- 选择器面板 ---- */
+  #frame .mode-picker { position: relative; flex-shrink: 1; min-width: 0; }
+  #frame .mode-picker .chat-mode { min-width: 0; max-width: 190px; }
+  #frame .mode-panel { position: absolute; left: 0; bottom: calc(100% + 6px); width: min(320px, calc(100vw - 40px)); max-height: 360px; overflow-y: auto; padding: 4px; z-index: 20; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 1px 2px rgba(0,0,0,.05), 0 8px 24px rgba(0,0,0,.08); display: none; opacity: 0; transform: translateY(4px) scale(.98); transform-origin: bottom left; pointer-events: none; transition: opacity .12s, transform .12s, display .12s allow-discrete; }
+  #frame .mode-panel[data-open="true"] { display: block; opacity: 1; transform: none; pointer-events: auto; }
+  #frame .pmp-search { display: flex; align-items: center; gap: 6px; margin: 2px 4px 6px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel-2); color: var(--dim); }
+  #frame .pmp-search input { flex: 1; min-width: 0; border: none; background: none; color: var(--text); font-size: 12.5px; outline: none; }
+  #frame .mode-item { display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 12px; border: none; border-radius: 7px; background: none; color: var(--text); font-size: 12.5px; text-align: left; white-space: nowrap; cursor: pointer; }
+  #frame .mode-item:hover { background: var(--accent-soft); }
+  #frame .mode-item.active { color: var(--accent-hover); font-weight: 600; }
+  #frame .pmp-check { flex-shrink: 0; opacity: 0; color: var(--accent-hover); }
+  #frame .mode-item.active .pmp-check { opacity: 1; }
+  #frame .pmp-main { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+  #frame .pmp-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  #frame .pmp-sub { flex-shrink: 0; font-size: 11px; color: var(--dim); }
+  #frame .pmp-slot { flex-shrink: 0; min-width: 52px; font-family: ui-monospace, Consolas, monospace; font-size: 11px; color: var(--dim); }
+  #frame .mode-item.active .pmp-slot { color: var(--accent-hover); }
+  #frame .pmp-model-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+  #frame .pmp-provider { font-weight: 600; }
+  #frame .pmp-model { padding-left: 28px; }
+  #frame .mode-hint { padding: 6px 10px; font-size: 11.5px; color: var(--dim); }
+
+  #frame .send-btn { width: var(--composer-h); height: var(--composer-h); display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; border: none; background: var(--accent); color: #fff; }
+</style>
+
+<div class="page">
+  <header class="page-head">
+    <h1>会话级供应商 / 模型选择 · UI 方案</h1>
+    <p class="page-lead">
+      新会话在<strong>首条消息发送前</strong>可选供应商与模型；不选则完全跟随 <code>~/.claude/settings.json</code>（全局当前供应商）。
+      选择按会话记录（<code>session-providers.json</code>），续聊复用；进程启动后供应商锁定，模型仍可在右侧热切。
+      下面帧内可点：点开下拉 → 选一个供应商/模型 → 点「发送」看锁定态。
+    </p>
+  </header>
+
+  <div class="try-row">
+    <span class="try-label">试：</span>
+    <button class="chip" data-demo="open">展开下拉</button>
+    <button class="chip" data-demo="pick">选 DeepSeek · deepseek-v4-pro</button>
+    <button class="chip" data-demo="send">发送（锁定）</button>
+    <button class="chip" data-demo="reset">重置</button>
+  </div>
+
+  <div class="frame-note">演示帧（chat 页底部输入卡片，其余界面从略）</div>
+  <div class="frame">
+    <div id="frame" data-theme="light">
+      <div class="app">
+        <div class="header">
+          <div class="brand"><h1>CC Desktop</h1></div>
+          <div class="header-tools">
+            <button class="icon-btn" title="主题">◐</button>
+            <button class="icon-btn" title="设置">⚙</button>
+          </div>
+        </div>
+        <div class="main">
+          <div class="main-left">
+            <div class="proj"><span class="name">claude-fast</span><span class="plus">＋</span></div>
+            <div class="proj"><span class="name">yaotu</span><span class="plus">＋</span></div>
+          </div>
+          <div class="viewer">
+            <div class="chat-body">新对话 · 空会话区</div>
+            <div class="chat-composer">
+              <div class="composer-card">
+                <textarea class="chat-input" placeholder="输入消息…"></textarea>
+                <div class="composer-bar">
+                  <button class="chat-mode" disabled>手动确认</button>
+
+                  <div class="mode-picker provider-model-picker">
+                    <button class="chat-mode" id="pmpTrigger">
+                      <span class="mode-label" id="pmpLabel">当前 · LongCat</span>
+                      <span class="mode-arrow" id="pmpArrow">▾</span>
+                    </button>
+                    <div class="mode-panel provider-model-panel" id="pmpPanel" data-open="false" role="listbox">
+                      <div class="pmp-search"><span>🔍</span><input id="pmpSearch" placeholder="搜索供应商或模型"></div>
+                      <div id="pmpItems"></div>
+                    </div>
+                  </div>
+
+                  <div class="composer-meta">
+                    <span>模型</span>
+                    <button class="send-btn" id="sendBtn" title="发送">➤</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="notes">
+    <div class="note">
+      <h3>为什么必须在启动前选</h3>
+      <p>供应商的 base URL 与凭证是 CLI <strong>进程启动</strong>时构造 API 客户端用的，进程起来后改 env 不会重建连接。模型可以在会话内热切（<code>setModel</code>），但只能切到当前供应商映射的模型。</p>
+    </div>
+    <div class="note">
+      <h3>注入走 flag 层，不动全局配置</h3>
+      <p>实测 <code>settings.json</code> 的 <code>env</code> 压过进程环境变量，而 SDK 的 <code>--settings</code>（flag 层）压过它。所以会话级供应商经 <code>Options.settings.env</code> 注入；凭证两键（<code>AUTH_TOKEN</code>/<code>API_KEY</code>）都写，避免逐键合并时全局残留赢。</p>
+    </div>
+    <div class="note">
+      <h3>不选 = 什么都不注入</h3>
+      <p><code>chat_start</code> 不带供应商/模型，CLI 按自身默认读 <code>settings.json</code>——与现在的行为完全一致。「记住上次选择」只影响下次新会话的默认预选。</p>
+    </div>
+  </div>
+</div>
+
+<script>
+  // 演示数据：取自 claudeProviderPresets 的模型槽位
+  const PROVIDERS = [
+    { id: "longcat", name: "LongCat", current: true, models: [["默认模型", "LongCat-2.5"], ["Sonnet", "LongCat-2.5"]] },
+    { id: "deepseek", name: "DeepSeek", models: [["默认模型", "deepseek-v4-pro"], ["Haiku", "deepseek-v4-flash"]] },
+    { id: "glm", name: "Zhipu GLM", models: [["默认模型", "glm-5.1"]] },
+    { id: "official", name: "Claude Official", models: [] },
+  ];
+
+  const label = document.getElementById("pmpLabel");
+  const arrow = document.getElementById("pmpArrow");
+  const panel = document.getElementById("pmpPanel");
+  const items = document.getElementById("pmpItems");
+  const search = document.getElementById("pmpSearch");
+  const trigger = document.getElementById("pmpTrigger");
+  const sendBtn = document.getElementById("sendBtn");
+  const frame = document.getElementById("frame");
+
+  let choice = { providerId: null, model: null };
+  let locked = false;
+
+  function buttonLabel() {
+    if (choice.providerId === null) {
+      const cur = PROVIDERS.find((p) => p.current);
+      return cur ? "当前 · " + cur.name : "当前供应商";
+    }
+    const p = PROVIDERS.find((x) => x.id === choice.providerId);
+    if (!p) return choice.model ?? "当前供应商";
+    return choice.model ? p.name + " · " + choice.model : p.name;
+  }
+
+  function render() {
+    label.textContent = buttonLabel();
+    trigger.disabled = locked;
+    arrow.textContent = locked ? "🔒" : "▾";
+    trigger.title = locked ? "会话已启动，供应商不可更改（模型仍可在右侧热切）" : "选择本会话用的供应商与模型（首条消息前可改）";
+
+    const q = search.value.trim().toLowerCase();
+    let html = "";
+    const cur = PROVIDERS.find((p) => p.current);
+    html += item({ providerId: null, model: null }, "当前供应商（跟随 Claude Code 配置）", cur ? cur.name : "", q);
+    for (const p of PROVIDERS) {
+      const hitSelf = !q || p.name.toLowerCase().includes(q);
+      const models = hitSelf ? p.models : p.models.filter((m) => m[1].toLowerCase().includes(q));
+      if (!hitSelf && models.length === 0) continue;
+      html += item({ providerId: p.id, model: null }, p.name, "", q, "pmp-provider");
+      for (const [slot, model] of models) {
+        html += item({ providerId: p.id, model }, "", "", q, "pmp-model", slot, model);
+      }
+    }
+    items.innerHTML = html;
+    for (const el of items.querySelectorAll("[data-pick]")) {
+      el.addEventListener("click", () => {
+        choice = JSON.parse(el.getAttribute("data-pick"));
+        render();
+        closePanel();
+      });
+    }
+    markActive();
+  }
+
+  function item(v, title, sub, q, cls = "", slot = "", model = "") {
+    const active = choice.providerId === v.providerId && choice.model === v.model ? " active" : "";
+    const data = JSON.stringify(v).replace(/"/g, "&quot;");
+    let inner;
+    if (slot) {
+      inner = `<span class="pmp-main"><span class="pmp-slot">${slot}</span><span class="pmp-model-name">${model}</span></span>`;
+    } else {
+      inner = `<span class="pmp-main"><span class="pmp-title">${title}</span>${sub ? `<span class="pmp-sub">${sub}</span>` : ""}</span>`;
+    }
+    return `<button type="button" class="mode-item ${cls}${active}" data-pick="${data}"><span class="pmp-check">✓</span>${inner}</button>`;
+  }
+
+  function markActive() { /* active 类已在 render 里算好 */ }
+
+  function openPanel() { panel.setAttribute("data-open", "true"); }
+  function closePanel() { panel.setAttribute("data-open", "false"); }
+
+  trigger.addEventListener("click", () => {
+    if (locked) return;
+    const open = panel.getAttribute("data-open") === "true";
+    if (open) closePanel(); else { openPanel(); search.focus(); }
+  });
+  sendBtn.addEventListener("click", () => {
+    locked = true;
+    closePanel();
+    render();
+    sendBtn.title = "已发送（演示）";
+  });
+  search.addEventListener("input", render);
+  search.addEventListener("keydown", (e) => e.stopPropagation());
+  document.addEventListener("mousedown", (e) => {
+    if (panel.getAttribute("data-open") !== "true") return;
+    if (!e.target.closest(".provider-model-picker")) closePanel();
+  });
+
+  document.querySelectorAll("[data-demo]").forEach((b) => {
+    b.addEventListener("click", () => {
+      const k = b.getAttribute("data-demo");
+      if (k === "open") { openPanel(); search.focus(); }
+      if (k === "pick") { choice = { providerId: "deepseek", model: "deepseek-v4-pro" }; render(); }
+      if (k === "send") { locked = true; render(); }
+      if (k === "reset") { locked = false; choice = { providerId: null, model: null }; search.value = ""; render(); }
+    });
+  });
+
+  frame.querySelector(".icon-btn").addEventListener("click", () => {
+    frame.setAttribute("data-theme", frame.getAttribute("data-theme") === "dark" ? "light" : "dark");
+  });
+
+  render();
+</script>

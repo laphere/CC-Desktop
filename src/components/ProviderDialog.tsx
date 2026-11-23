@@ -29,6 +29,10 @@ import {
   providerPresets,
   type ProviderPreset,
 } from "../config/claudeProviderPresets";
+import {
+  PROVIDER_MODEL_SLOTS,
+  type ProviderModelSlotKey,
+} from "../lib/provider-models";
 import { applyTemplateValues, extractBaseUrl } from "../utils/templateValues";
 
 interface Props {
@@ -62,16 +66,27 @@ function set1M(model: string, enabled: boolean): string {
   return enabled ? `${base}${ONE_M_MARKER}` : base;
 }
 
-/** 模型映射行：envKey 写入键；nameKey 为显示名配套键（_NAME，随模型同步）；
- *  Haiku 不支持 1M 声明；已废弃键 ANTHROPIC_SMALL_FAST_MODEL 在写入时清理 */
-const MODEL_ROWS = [
-  { key: "model", envKey: "ANTHROPIC_MODEL", nameKey: null, label: "默认模型", hint: "兜底模型 ANTHROPIC_MODEL", supportsOneM: true },
-  { key: "sonnet", envKey: "ANTHROPIC_DEFAULT_SONNET_MODEL", nameKey: "ANTHROPIC_DEFAULT_SONNET_MODEL_NAME", label: "Sonnet", hint: undefined, supportsOneM: true },
-  { key: "opus", envKey: "ANTHROPIC_DEFAULT_OPUS_MODEL", nameKey: "ANTHROPIC_DEFAULT_OPUS_MODEL_NAME", label: "Opus", hint: undefined, supportsOneM: true },
-  { key: "fable", envKey: "ANTHROPIC_DEFAULT_FABLE_MODEL", nameKey: "ANTHROPIC_DEFAULT_FABLE_MODEL_NAME", label: "Fable", hint: undefined, supportsOneM: true },
-  { key: "haiku", envKey: "ANTHROPIC_DEFAULT_HAIKU_MODEL", nameKey: "ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME", label: "Haiku", hint: undefined, supportsOneM: false },
-  { key: "subagent", envKey: "CLAUDE_CODE_SUBAGENT_MODEL", nameKey: null, label: "子代理", hint: "CLAUDE_CODE_SUBAGENT_MODEL", supportsOneM: true },
-] as const;
+/** 模型映射行的附加字段（key/envKey/label 由 provider-models.ts 的槽位表统一给出）。
+ *  nameKey 为显示名配套键（_NAME，随模型同步）；Haiku 不支持 1M 声明；
+ *  已废弃键 ANTHROPIC_SMALL_FAST_MODEL 在写入时清理。 */
+const MODEL_ROW_EXTRAS: Record<
+  ProviderModelSlotKey,
+  { nameKey: string | null; hint?: string; supportsOneM: boolean }
+> = {
+  model: { nameKey: null, hint: "兜底模型 ANTHROPIC_MODEL", supportsOneM: true },
+  sonnet: { nameKey: "ANTHROPIC_DEFAULT_SONNET_MODEL_NAME", supportsOneM: true },
+  opus: { nameKey: "ANTHROPIC_DEFAULT_OPUS_MODEL_NAME", supportsOneM: true },
+  fable: { nameKey: "ANTHROPIC_DEFAULT_FABLE_MODEL_NAME", supportsOneM: true },
+  haiku: { nameKey: "ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME", supportsOneM: false },
+  subagent: { nameKey: null, hint: "CLAUDE_CODE_SUBAGENT_MODEL", supportsOneM: true },
+};
+
+const MODEL_ROWS = PROVIDER_MODEL_SLOTS.map((s) => ({
+  key: s.key,
+  envKey: s.envKey,
+  label: s.label,
+  ...MODEL_ROW_EXTRAS[s.key],
+}));
 
 type ModelRowKey = (typeof MODEL_ROWS)[number]["key"];
 

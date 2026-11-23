@@ -375,6 +375,18 @@ describe("purgeClaudeProjectData", () => {
     expect(fs.existsSync(aliveDir)).toBe(true);
   });
 
+  it("onBeforeDelete 只在真正删除前触发（未删的路径不误报）", () => {
+    const deadPath = "D:\\dead\\proj2";
+    fs.mkdirSync(path.join(projects, mangleProjectPath(deadPath)), { recursive: true });
+    const alivePath = path.join(tmp, "alive-proj2");
+    fs.mkdirSync(alivePath);
+    fs.mkdirSync(path.join(projects, mangleProjectPath(alivePath)), { recursive: true });
+    const fired: string[] = [];
+    const removed = purgeClaudeProjectData([deadPath, alivePath], projects, (p) => fired.push(p));
+    expect(removed).toBe(1);
+    expect(fired).toEqual([deadPath]);
+  });
+
   it("只删精确同名目录，相似名字兄弟目录无恙", () => {
     const dirProj = path.join(projects, mangleProjectPath("Proj"));
     const dirProj2 = path.join(projects, mangleProjectPath("Proj2"));

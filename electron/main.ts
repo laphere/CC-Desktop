@@ -60,6 +60,12 @@ import {
   providerSwitchFrom,
 } from "./backend/provider";
 import {
+  pruneSessionProviders,
+  readSessionProviderState,
+  recordSessionProvider,
+  resolveSessionProviderEnv,
+} from "./backend/session-provider";
+import {
   claudeProjectsDir,
   resolveRootDir,
   type RootResolution,
@@ -178,6 +184,32 @@ function projectsDir(): string {
 
 function trashRootDir(): string {
   return path.join(rootDir(), "trash", "sessions");
+}
+
+/** 给会话条目补上记录过的供应商/模型（续聊时透传给前端预填）。
+ *  无记录的条目保持 undefined——前端据此显示「跟随配置」。 */
+function attachSessionProviders<T extends { sessionId: string }>(
+  root: string,
+  list: T[],
+): T[] {
+  const st = readSessionProviderState(root);
+  // 供应商已删的记录不挂上去（与 session_provider_last 的校验同口径）：
+  // 否则续聊会把死 id 再记一遍，前端也只能显示「原供应商已删除」。
+  // 没有记录时连 config 都不必读——少一次同步读，也少一个与调用方读 config 的窗口。
+  const validIds =
+    Object.keys(st.sessions).length === 0
+      ? null
+      : new Set(loadConfig(root).providers.map((p) => p.id));
+  for (const item of list) {
+    const c = st.sessions[item.sessionId];
+    if (!c) continue;
+    if (validIds && c.providerId && !validIds.has(c.providerId)) continue;
+    (item as T & { providerId?: string | null; providerModel?: string | null }).providerId =
+      c.providerId;
+    (item as T & { providerId?: string | null; providerModel?: string | null }).providerModel =
+      c.model;
+  }
+  return list;
 }
 
 // ---------------- 对话层：ChathManager + 事件定向推送 ----------------
@@ -503,9 +535,21 @@ function registerIpc(): void {
   handle("get_claude_projects_dir", () => projectsDir());
   handle("purge_claude_project_data", async (p) => {
     const paths = Array.isArray(p.paths) ? p.paths.map(String) : [];
-    const removed = purgeClaudeProjectData(paths, projectsDir());
-    // 项目数据没了，其置顶会话条目必须一并撤掉（否则置顶区留下孤儿条目）
-    await mutateConfig(rootDir(), (cfg) => dropPinsForProjects(cfg, paths));
+    // 只对**真正被删**的路径修剪会话级供应商记录（项目还活着的路径不删，记录要留着）；
+    // 回调在 rmSync 之前触发，此刻还查得到该项目的 sessionId。
+    const ids: string[] = [];
+    const removed = purgeClaudeProjectData(paths, projectsDir(), (projectPath) => {
+      // 与 purgeOneProjectData 的 mangle 口径一致（先 trim），否则带首尾空白的路径收不到 id
+      ids.push(...listSessions(projectsDir(), projectPath.trim()).map((s) => s.sessionId));
+    });
+    try {
+      // 项目数据没了，其置顶会话条目必须一并撤掉（否则置顶区留下孤儿条目）
+      await mutateConfig(rootDir(), (cfg) => dropPinsForProjects(cfg, paths));
+    } finally {
+      // 修剪不依赖配置保存成功（删除已发生，记录不能留孤儿）；但它自己的失败
+      // 不许盖掉原始错误——孤儿记录可被动清理，原始错误不能丢。
+      await pruneSessionProviders(rootDir(), ids).catch(() => {});
+    }
     return removed;
   });
 
@@ -516,10 +560,14 @@ function registerIpc(): void {
     // 一下完整首条消息、两秒后再被 CLI 起的名字替换（2026-09-22 用户实测反馈）。标题到手后
     // 前端会带着 `session_title` 事件再刷一次，那时它带着真名字出现（起名失败会推兜底标题）。
     const pending = chatManager.titlePendingIds();
-    return pending.size === 0 ? list : list.filter((s) => !pending.has(s.sessionId));
+    const visible = pending.size === 0 ? list : list.filter((s) => !pending.has(s.sessionId));
+    return attachSessionProviders(rootDir(), visible);
   });
   handle("list_pinned_sessions", () =>
-    listPinnedSessions(projectsDir(), loadConfig(rootDir()).pinnedSessions));
+    attachSessionProviders(
+      rootDir(),
+      listPinnedSessions(projectsDir(), loadConfig(rootDir()).pinnedSessions),
+    ));
   handle("rename_session", (p) => renameSession(String(p.file), String(p.newTitle), projectsDir()));
   handle("delete_session", (p) => {
     // 校验（限 projects 目录下 uuid.jsonl）后移入回收站（先备份再删除）
@@ -532,13 +580,26 @@ function registerIpc(): void {
     return restoreTrashedFile(fp, projectsDir());
   });
   handle("purge_session", async (p) => {
-    purgeSessionBackup(String(p.file), rootDir());
-    // 彻底删除后清掉会话文件已不存在的置顶条目（进回收站的删除不清，等恢复）
-    await mutateConfig(rootDir(), (cfg) => pruneDeadPins(cfg));
+    const file = String(p.file);
+    purgeSessionBackup(file, rootDir());
+    const sid = path.basename(file).replace(/\.jsonl$/i, "");
+    try {
+      // 彻底删除后清掉会话文件已不存在的置顶条目（进回收站的删除不清，等恢复）
+      await mutateConfig(rootDir(), (cfg) => pruneDeadPins(cfg));
+    } finally {
+      // 会话级供应商记录也一并丢掉（sessionId = jsonl 文件名去扩展名）；失败不盖原始错误
+      await pruneSessionProviders(rootDir(), [sid]).catch(() => {});
+    }
   });
   handle("purge_trash", async () => {
+    // 清空回收站会永久删掉全部已删会话，会话级供应商记录一并修剪（同 purge_session）
+    const ids = listTrashedSessionsIn(trashRootDir()).map((t) => t.sessionId);
     const n = purgeTrashIn(trashRootDir());
-    await mutateConfig(rootDir(), (cfg) => pruneDeadPins(cfg));
+    try {
+      await mutateConfig(rootDir(), (cfg) => pruneDeadPins(cfg));
+    } finally {
+      await pruneSessionProviders(rootDir(), ids).catch(() => {});
+    }
     return n;
   });
   handle("get_session_messages", (p) =>
@@ -551,11 +612,12 @@ function registerIpc(): void {
     // list_projects 同源；config 只读一次，不继承旧 handler 连读两次的写法）
     const cfg = loadConfig(rootDir());
     const projects = listProjects(projectsDir(), cfg.projects, cfg.excluded);
-    return searchSessions(
+    const out = await searchSessions(
       projectsDir(),
       String(p.keyword),
       projects.map((x) => x.path),
     );
+    return { ...out, results: attachSessionProviders(rootDir(), out.results) };
   });
   handle("get_session_user_prompts", (p) => getSessionUserPrompts(String(p.file), projectsDir()));
   handle("export_session", (p) =>
@@ -570,13 +632,26 @@ function registerIpc(): void {
     // 续聊用 jsonl 文件名（去掉扩展名）当 CLI 会话 id；新对话自己生成一个 uuid
     const resumeId = sessionFile ? path.basename(sessionFile).replace(/\.jsonl$/i, "") : undefined;
     const sessionId = resumeId ?? crypto.randomUUID();
+    const providerId = p.providerId ? String(p.providerId) : null;
+    const model = p.model ? String(p.model) : null;
     chatTokens.set(sessionId, String(p.token));
     chatManager.start(sessionId, {
       projectPath: String(p.projectPath),
       resumeId,
       // null = 跟随 settings.json 的 defaultMode（不传 --permission-mode）
       initialMode: p.permissionMode ?? undefined,
+      // 会话级供应商：经 SDK flag 层注入（null = 跟随全局 settings.json）
+      providerEnv: resolveSessionProviderEnv(rootDir(), providerId),
+      model,
     });
+    // 记下这次选择：续聊复用（sessions），新会话顺便更新「上次选择」（last）。
+    // fire-and-forget——记录失败不该让会话起不来；下次读取时按没有记录处理。
+    void recordSessionProvider(
+      rootDir(),
+      sessionId,
+      { providerId, model },
+      resumeId === undefined,
+    ).catch(() => {});
     return sessionId;
   });
   handle("chat_send", (p) =>
@@ -657,6 +732,14 @@ function registerIpc(): void {
   handle("provider_read_live", () => providerReadLiveFrom(claudeConfigDir()));
   handle("fetch_models_for_config", (p) => fetchModels(String(p.baseUrl), String(p.apiKey)));
   handle("provider_query_usage", (p) => providerQueryUsageFrom(rootDir(), String(p.id)));
+  // 最近一次新会话用的供应商/模型（新会话默认预选）；无记录 → null。
+  // 记录里的供应商已被删 → 回 null，让前端退回「跟随配置」，别把默认值永久停在死 id 上。
+  handle("session_provider_last", () => {
+    const last = readSessionProviderState(rootDir()).last;
+    if (!last || !last.providerId) return last;
+    const exists = loadConfig(rootDir()).providers.some((p) => p.id === last.providerId);
+    return exists ? last : null;
+  });
   // 外链一律走 shell.openExternal（Electron 正路 API，系统默认浏览器打开、失败
   // reject 有回执）；scheme 白名单校验在 provider.ts 的 httpHttpsUrlOrNull。
   // ⚠️ 别改回 spawn explorer.exe 的老实现：spawn 成功 ≠ 浏览器打开，失败无声

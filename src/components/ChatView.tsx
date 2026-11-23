@@ -80,6 +80,7 @@ import {
   XIcon,
 } from "./Icons";
 import ModelPicker from "./ModelPicker";
+import ProviderModelPicker, { type ProviderChoice } from "./ProviderModelPicker";
 import type {
   ChatCommandInfo,
   ChatEvent,
@@ -90,6 +91,7 @@ import type {
   ChatRewindResult,
   ChatUsage,
   ContentBlock,
+  ProviderListState,
   SessionInfo,
   SessionMessage,
   SessionSearchHit,
@@ -104,6 +106,12 @@ interface Props {
   title: string;
   /** 续聊的会话（null = 新对话） */
   session: SessionInfo | null;
+  /** 供应商清单（会话级选择器的数据源；null = 还在加载） */
+  providerState?: ProviderListState | null;
+  /** 续聊时该会话记录过的供应商（后端 session-providers.json）；undefined = 无记录 */
+  initialProviderId?: string | null;
+  /** 续聊时该会话记录过的模型 */
+  initialProviderModel?: string | null;
   onToast: (msg: string) => void;
   /** 对话状态变化上报（多会话 tab 的进行中标记） */
   onStatusChange?: (phase: ChatStatus["phase"]) => void;
@@ -404,6 +412,9 @@ export default function ChatView({
   projectPath,
   title,
   session,
+  providerState = null,
+  initialProviderId = null,
+  initialProviderModel = null,
   onToast,
   onStatusChange,
   onSessionReady,
@@ -481,6 +492,53 @@ export default function ChatView({
    *  而 ref 赋值不触发渲染。⚠️ 二者**只能经 setSessionKey 一起改**：散着写就会出现
    *  「ref 已清空、state 还在」，于是死会话上仍渲染着活按钮，点下去全是「会话不存在」 */
   const [chatKey, setChatKey] = useState<string | null>(null);
+  /** 本会话用的供应商/模型：续聊用 props 预填（记录值），新会话挂载时拉「上次选择」。
+   *  进程起来后选择器锁定（见 ProviderModelPicker 的 disabled）。 */
+  const [providerChoice, setProviderChoice] = useState<ProviderChoice>({
+    providerId: initialProviderId ?? null,
+    model: initialProviderModel ?? null,
+  });
+  /** 选择值的 ref 镜像：异步链路（等「上次选择」回包）读它，避免闭包拿到过期 state */
+  const providerChoiceRef = useRef(providerChoice);
+  /** 「上次选择」回包的 promise（新会话挂载时发起）；首条消息前等它落地，否则会按 null 注入 */
+  const lastChoicePromiseRef = useRef<Promise<void> | null>(null);
+  /** 用户是否手动改过供应商/模型：改过就不再被「上次选择」的迟到回包顶掉 */
+  const providerTouchedRef = useRef(false);
+  /** 「选择已注入」锁：**只在真正调用 chatStart 前一刻**置位。
+   *  ⚠️ 别拿 startPromiseRef 兼作这个闸——它在 waitLast 被 await 前就同步赋值了，
+   *  回包先到时会看见它已为真而被丢弃，等于让等待白等。 */
+  const choiceLockedRef = useRef(false);
+  /** 一起改 ref 与 state（ref 是异步链路的真源，state 只负责渲染） */
+  const applyProviderChoice = useCallback((v: ProviderChoice) => {
+    providerChoiceRef.current = v;
+    setProviderChoice(v);
+  }, []);
+  // 新会话的默认选择 = 上次新会话用的（「记住上次选择」）；续聊已有记录值，不覆盖。
+  useEffect(() => {
+    if (session) return;
+    let alive = true;
+    const p = api
+      .sessionProviderLast()
+      .then((last) => {
+        // 三道闸：用户已手动选过 / 进程已起 / 选择已注入——都不许回包顶掉，否则选择器
+        // 显示会与实际注入不一致。choiceLockedRef 在 chatStart 调用前一刻才置位，
+        // 这样「先 await 回包再发首条消息」的路径里，回包仍会先落地（见 ensureStarted）。
+        if (
+          alive &&
+          last &&
+          !providerTouchedRef.current &&
+          !sessionKeyRef.current &&
+          !choiceLockedRef.current
+        ) {
+          applyProviderChoice({ providerId: last.providerId, model: last.model });
+        }
+      })
+      .catch(() => {});
+    lastChoicePromiseRef.current = p;
+    return () => {
+      alive = false;
+    };
+  }, [session]);
   /** `/` 命令补全：命令表（首次触发补全时拉一次）、键盘选中项、Esc 收起标记 */
   const [cmds, setCmds] = useState<ChatCommandInfo[] | null>(null);
   const [cmdIdx, setCmdIdx] = useState(0);
@@ -1385,14 +1443,28 @@ export default function ChatView({
       setStatus({ phase: "starting" });
       const channel = new Channel<ChatEvent>();
       channel.onmessage = handleEvent;
-      startPromiseRef.current = api
-        .chatStart(
-          projectPath,
-          session?.file ?? null,
-          // 用户改选过 → 显式传 flag；否则跟随 settings.json（不传 flag）
-          modeTouchedRef.current && mode ? (mode as ChatPermissionMode) : null,
-          channel,
-        )
+      // 先等「上次选择」回包落地（仅当用户还没动过）——否则首条消息会按 null 注入，
+      // 把本应继承的上次选择覆盖成「跟随全局」。等待窗口就是新 tab 挂载后的一次 IPC。
+      const waitLast = !providerTouchedRef.current
+        ? (lastChoicePromiseRef.current ?? Promise.resolve())
+        : Promise.resolve();
+      startPromiseRef.current = waitLast
+        .catch(() => {})
+        .then(() => {
+          // 锁在这一刻才上：waitLast 期间到达的回包已先于本回调落地（见 choiceLockedRef）
+          choiceLockedRef.current = true;
+          return api.chatStart(
+            projectPath,
+            session?.file ?? null,
+            // 用户改选过 → 显式传 flag；否则跟随 settings.json（不传 flag）
+            modeTouchedRef.current && mode ? (mode as ChatPermissionMode) : null,
+            // 会话级供应商/模型：null = 不注入，CLI 跟随全局 settings.json。
+            // 读 ref（可能在上面 await 期间被回包更新），不读闭包里的旧 state。
+            providerChoiceRef.current.providerId,
+            providerChoiceRef.current.model,
+            channel,
+          );
+        })
         .then((key) => {
           setSessionKey(key);
           setStatus({ phase: "idle" });
@@ -1400,11 +1472,14 @@ export default function ChatView({
         })
         .catch((e) => {
           startPromiseRef.current = null;
+          choiceLockedRef.current = false; // 失败可重试，允许重新读回包/重选
           setStatus({ phase: "idle" });
           throw e;
         });
     }
     return startPromiseRef.current;
+    // providerChoice 刻意不进依赖：选择走 ref 读取（见 providerChoiceRef 注释），
+    // 进依赖只会让每次选择都重建这个 callback
   }, [projectPath, session, mode, handleEvent, readOnly]);
 
   // ---------- 发送 / 停止 / 权限 / 模式 ----------
@@ -3561,6 +3636,19 @@ export default function ChatView({
               options={MODE_OPTIONS}
               extra={mode !== null && !MODE_OPTIONS.some((o) => o.value === mode) ? mode : null}
               onChange={(m) => void changeMode(m)}
+            />
+            {/* 会话级供应商/模型：首条消息前可改，进程起来后锁定。放在模式选择器之后、
+                .composer-meta 之前（后者 margin-left:auto，顺序不能反） */}
+            <ProviderModelPicker
+              state={providerState}
+              value={providerChoice}
+              // 「starting」就要锁：chat_start 已把当时的选择注入，进程起来只是时间问题；
+              // 这期间再改只会让显示与实际不一致
+              disabled={chatKey != null || status.phase === "starting"}
+              onChange={(v) => {
+                providerTouchedRef.current = true;
+                applyProviderChoice(v);
+              }}
             />
             {/* 卡片中部靠右：模型 / 思考强度 / 已用上下文。三项都是「拿得到才显示」——
                 effort 尤其可能一直拿不到（CLI 只在 Remote Control 类宿主上发）。

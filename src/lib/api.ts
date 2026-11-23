@@ -172,6 +172,8 @@ export const api = {
     projectPath: string,
     sessionFile: string | null,
     permissionMode: ChatPermissionMode | null,
+    providerId: string | null,
+    model: string | null,
     onEvent: Channel<ChatEvent>,
   ): Promise<string> => {
     const token = `c${++chatTokenSeq}-${Date.now()}`;
@@ -181,6 +183,8 @@ export const api = {
         projectPath,
         sessionFile,
         permissionMode,
+        providerId,
+        model,
         token,
       });
       // 记下退订函数：chatClose 时摘掉监听。不摘的话每开过一个对话 tab 就永久
@@ -313,6 +317,9 @@ export const api = {
     invoke<FetchedModel[]>("fetch_models_for_config", { baseUrl, apiKey }),
   /** 查询供应商 Coding Plan 用量（非已知厂商返回 supported=false） */
   providerQueryUsage: (id: string) => invoke<UsageResult>("provider_query_usage", { id }),
+  /** 最近一次新会话用的供应商/模型（新会话默认预选）；无记录返回 null */
+  sessionProviderLast: () =>
+    invoke<{ providerId: string | null; model: string | null } | null>("session_provider_last"),
   /** 用系统默认浏览器打开外部链接（官网 / 获取 API Key） */
   openUrl: (url: string) => invoke("open_url", { url }),
   // ---------- 文件预览与打开（消息里的生成文件路径 chip） ----------

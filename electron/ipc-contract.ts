@@ -128,6 +128,10 @@ export interface IpcContract {
     projectPath: string;
     sessionFile: string | null;
     permissionMode: ChatPermissionMode | null;
+    /** 会话级供应商 id；null = 不注入、跟随全局 settings.json */
+    providerId: string | null;
+    /** 会话级模型（等价 --model）；null = 跟随供应商/默认 */
+    model: string | null;
     token: string;
   };
   /** text 为 "" + images 非空 = 纯图消息（与 v2.0.0 的 `text: String` 同形） */
@@ -199,6 +203,8 @@ export interface IpcContract {
   provider_read_live: void;
   fetch_models_for_config: { baseUrl: string; apiKey: string };
   provider_query_usage: { id: string };
+  /** 最近一次新会话用的供应商/模型（新会话默认预选）；无记录返回 null */
+  session_provider_last: void;
   open_url: { url: string };
   // ---------- 文件预览与打开（消息里的生成文件路径 chip） ----------
   // base = 相对路径的解析根（= 会话的项目根）；主进程统一做 `~` 展开与拼接
@@ -351,6 +357,7 @@ export const IPC_CHANNELS = [
   "provider_read_live",
   "fetch_models_for_config",
   "provider_query_usage",
+  "session_provider_last",
   "open_url",
   "open_file",
   "reveal_file",

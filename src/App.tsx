@@ -129,6 +129,7 @@ const ChatTabPane = memo(function ChatTabPane({
   projectPath,
   title,
   session,
+  providerState,
   readOnly,
   active,
   continueHint,
@@ -144,6 +145,7 @@ const ChatTabPane = memo(function ChatTabPane({
   projectPath: string;
   title: string;
   session: SessionInfo | null;
+  providerState: ProviderListState | null;
   readOnly: boolean;
   active: boolean;
   continueHint: string;
@@ -163,6 +165,9 @@ const ChatTabPane = memo(function ChatTabPane({
       projectPath={projectPath}
       title={title}
       session={session}
+      providerState={providerState}
+      initialProviderId={session?.providerId ?? null}
+      initialProviderModel={session?.providerModel ?? null}
       onToast={onToast}
       onStatusChange={(phase) => onStatusChange(tabId, phase)}
       onSessionReady={(meta) => onSessionReady(tabId, meta)}
@@ -1926,6 +1931,7 @@ export default function App() {
                   projectPath={t.projectPath}
                   title={t.title}
                   session={t.session}
+                  providerState={providerState}
                   readOnly={t.readOnly === true}
                   active={t.id === activeTabId}
                   continueHint={defaultInteraction === "terminal" ? "继续对话" : "继续对话"}

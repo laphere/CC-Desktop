@@ -85,6 +85,11 @@ export interface SessionInfo {
   lastModified: number;
   /** jsonl 文件绝对路径（重命名时回传） */
   file: string;
+  /** 该会话创建时用的供应商 id（后端 session-providers.json）；undefined = 无记录，
+   *  续聊时跟随全局 settings.json */
+  providerId?: string | null;
+  /** 该会话创建时用的模型（等价 --model）；undefined = 无记录 */
+  providerModel?: string | null;
 }
 
 /** 置顶区展示项：会话元数据 + 所属项目路径（后端按置顶清单实时解析） */
